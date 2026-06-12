@@ -11,58 +11,74 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard", active: true },
-  { icon: Upload, label: "Upload" },
-  { icon: Box, label: "Products" },
-  { icon: Copy, label: "Duplicates" },
-  { icon: MessageSquare, label: "Ask" },
+  { icon: LayoutDashboard, label: "Dashboard", href: "#/" },
+  { icon: Upload, label: "Upload", href: "#/upload" },
+  { icon: Box, label: "Products", href: "#/products" },
+  { icon: Copy, label: "Duplicates", href: "#/duplicates" },
+  { icon: MessageSquare, label: "Ask", href: "#/ask" },
 ];
 
 const bottomItems = [
-  { icon: Settings, label: "Settings" },
-  { icon: HelpCircle, label: "Help" },
+  { icon: Settings, label: "Settings", href: "#/settings" },
+  { icon: HelpCircle, label: "Help", href: "#/help" },
 ];
 
-export default function SideNavBar() {
+interface SideNavBarProps {
+  /** Label of the nav item to render as active. */
+  active?: string;
+}
+
+export default function SideNavBar({ active = "Dashboard" }: SideNavBarProps) {
   return (
     <aside className="hidden md:flex fixed inset-y-0 left-0 z-50 w-60 flex-col justify-between bg-surface-container-lowest border-r border-outline-variant py-container-padding px-4">
       {/* Logo */}
       <div>
-        <div className="mb-8 px-2">
-          <span className="font-h2 text-h2 text-primary">ProductDNA</span>
-          <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-            Master Data Steward
-          </p>
+        <div className="mb-8 px-2 flex items-center gap-3">
+          <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-on-primary font-bold">
+            P
+          </div>
+          <div>
+            <span className="font-h2 text-h2 text-primary">ProductDNA</span>
+            <p className="font-label-caps text-label-caps text-on-surface-variant">
+              Master Data Steward
+            </p>
+          </div>
         </div>
 
         {/* Main nav */}
         <nav className="space-y-1">
-          {navItems.map(({ icon: Icon, label, active }) => (
-            <button
+          {navItems.map(({ icon: Icon, label, href }) => (
+            <a
               key={label}
+              href={href}
               className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl font-body-base text-body-base font-medium transition-colors ${
-                active
+                label === active
                   ? "bg-primary-fixed text-primary"
                   : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
               }`}
             >
               <Icon size={18} strokeWidth={2} />
               {label}
-            </button>
+            </a>
           ))}
         </nav>
       </div>
 
       {/* Bottom nav */}
       <nav className="space-y-1">
-        {bottomItems.map(({ icon: Icon, label }) => (
-          <button
+        {bottomItems.map(({ icon: Icon, label, href }) => (
+          <a
             key={label}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl font-body-base text-body-base font-medium text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
+            href={href}
+            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl font-body-base text-body-base font-medium transition-colors ${
+              label === active
+                ? "bg-primary-fixed text-primary"
+                : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
+            }`}
           >
             <Icon size={18} strokeWidth={2} />
             {label}
-          </button>
+          </a>
         ))}
       </nav>
     </aside>
