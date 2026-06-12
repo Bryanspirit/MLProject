@@ -4,8 +4,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, List, Any
-from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext, UsageLimits
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent, RunContext, UsageLimits, PromptedOutput
 from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
@@ -14,13 +14,18 @@ from app.tools.vision import vision_describe
 from app.tools.ocr import ocr_full, ocr_region, OCRResult
 from app.tools.barcode_lookup import lookup_barcode
 from app.validation.barcode import validate_barcode
+from app.agents.ollama_model import ollama_model
 
 load_dotenv()
 
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 CACHE_DIR = Path("demo_cache")
 MAX_ITERATIONS = int(os.getenv("MAX_AGENT_ITERATIONS", "6"))
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5-vl:7b")
+# The extraction agent is the *orchestrator*: it calls tools (vision_describe,
+# ocr_*, barcode lookup). It must run on a tool-capable model. The vision model
+# (qwen2.5vl) does NOT support tools and is invoked directly inside the
+# vision_describe tool (see app/tools/vision.py), not as the agent model.
+AGENT_MODEL = os.getenv("AGENT_MODEL", "gemma4:latest")
 
 @dataclass
 class ExtractionDeps:
@@ -28,7 +33,7 @@ class ExtractionDeps:
     db_session: AsyncSession
 
 class RawSources(BaseModel):
-    vision_responses: List[dict]
+    vision_responses: List[dict] = Field(default_factory=list)
     ocr_text: Optional[str] = None
     ocr_confidence: Optional[float] = None
     barcode_lookup: Optional[dict] = None
@@ -40,12 +45,15 @@ class ExtractionResult(BaseModel):
     barcode: Optional[str] = None
     category: Optional[str] = None
     packaging: Optional[str] = None
-    sources: RawSources
+    # Defaulted so the model only has to return the attribute fields above;
+    # the raw tool outputs aren't required from the model itself.
+    sources: RawSources = Field(default_factory=RawSources)
 
 extraction_agent = Agent(
-    f"ollama:{VISION_MODEL}",
+    ollama_model(AGENT_MODEL),
     deps_type=ExtractionDeps,
-    output_type=ExtractionResult,
+    output_type=PromptedOutput(ExtractionResult),
+    retries=3,
     system_prompt=(
         "You are a product data extraction specialist. Your job is to extract "
         "accurate product attributes from product packaging images.\n\n"
@@ -94,26 +102,44 @@ async def tool_validate_barcode(ctx: RunContext[ExtractionDeps], code: str) -> d
     res = validate_barcode(code)
     return {"valid": res.valid, "format": res.format, "reason": res.reason}
 
+def _demo_extraction(image_path: str) -> ExtractionResult:
+    """Deterministic placeholder used in DEMO_MODE when no real cache capture
+    exists, so the upload flow completes without a live model backend."""
+    suffix = hashlib.md5(Path(image_path).read_bytes()).hexdigest()[:6].upper()
+    return ExtractionResult(
+        brand="Demo Brand",
+        product_name=f"Sample Product {suffix}",
+        weight="500 ml",
+        barcode=None,
+        category="Beverages",
+        packaging="Bottle",
+        sources=RawSources(
+            vision_responses=[{"note": "DEMO_MODE placeholder — no model call"}],
+            ocr_text=None,
+            ocr_confidence=None,
+            barcode_lookup=None,
+        ),
+    )
+
+
 async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionResult:
+    # DEMO_MODE: serve a recorded capture if we have one, otherwise a
+    # deterministic mock — never touches the live model backend.
     if DEMO_MODE:
         cache_key = hashlib.md5(Path(image_path).read_bytes()).hexdigest()
         cache_file = CACHE_DIR / f"{cache_key}.json"
         if cache_file.exists():
             return ExtractionResult(**json.loads(cache_file.read_text()))
-    
+        mock = _demo_extraction(image_path)
+        CACHE_DIR.mkdir(exist_ok=True)
+        cache_file.write_text(mock.model_dump_json())
+        return mock
+
+    # Live extraction via the Ollama-backed agent.
     deps = ExtractionDeps(image_path=image_path, db_session=db)
     result = await extraction_agent.run(
         "Extract all product data from this image.",
         deps=deps,
         usage_limits=UsageLimits(request_limit=MAX_ITERATIONS)
     )
-    
-    output = result.data
-    
-    if DEMO_MODE:
-        CACHE_DIR.mkdir(exist_ok=True)
-        cache_key = hashlib.md5(Path(image_path).read_bytes()).hexdigest()
-        cache_file = CACHE_DIR / f"{cache_key}.json"
-        cache_file.write_text(output.model_dump_json())
-    
-    return output
+    return result.output

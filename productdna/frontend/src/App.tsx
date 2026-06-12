@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Dashboard from "./pages/Dashboard";
 import ProductDetail from "./pages/ProductDetail";
+import ProductReviewPage from "./pages/ProductReview";
 import Upload from "./pages/Upload";
 import Duplicates from "./pages/Duplicates";
 import Ask from "./pages/Ask";
@@ -17,8 +18,20 @@ function useHashRoute() {
   return hash;
 }
 
-export default function App() {
+const App: React.FC = () => {
   const hash = useHashRoute();
+
+  // Simple hash-based routing
+  const parts = hash.slice(2).split('/');
+  const page = parts[0];
+  const param = parts[1];
+
+  if (page === 'products' && param) {
+    // This is a simplified way to pass the ID.
+    // In a real app, you'd use a proper routing library like react-router-dom
+    // to handle this more elegantly.
+    return <ProductReviewPage />;
+  }
 
   switch (hash) {
     case "#/upload":
@@ -32,10 +45,11 @@ export default function App() {
     case "#/help":
       return <Help />;
     case "#/products":
-    case "#/product":
-      return <ProductDetail />;
+      return <ProductDetail />; // This would be the product list page
     case "#/":
     default:
       return <Dashboard />;
   }
 }
+
+export default App;

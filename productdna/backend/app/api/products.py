@@ -66,18 +66,4 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Product not found")
     return model_to_response(product)
 
-@router.get("/stats", response_model=StatsResponse)
-async def get_stats(db: AsyncSession = Depends(get_db)):
-    # Simple stats for now
-    total = await db.execute(select(func.count(Product.id)))
-    processed = total.scalar() or 0
-    
-    needs_review_res = await db.execute(select(func.count(Product.id)).where(Product.status == "needs_review"))
-    needs_review = needs_review_res.scalar() or 0
-    
-    return StatsResponse(
-        products_processed=processed,
-        avg_confidence=85.0, # Placeholder
-        duplicates_pending=0, # Placeholder
-        needs_review=needs_review
-    )
+# Removed @router.get("/stats") as it is now handled by the dashboard router

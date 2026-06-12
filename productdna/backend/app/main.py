@@ -7,9 +7,10 @@ from app.db import init_db
 app = FastAPI(title="ProductDNA API", version="1.0.0")
 
 # CORS
+# We add the new frontend port to the allowlist.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,9 +32,10 @@ async def startup():
     await init_db()
 
 # Routers
-from app.api import upload, products, duplicates, export, query
+from app.api import upload, products, duplicates, export, query, dashboard
 app.include_router(upload.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(duplicates.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(query.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
