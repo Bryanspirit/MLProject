@@ -22,7 +22,9 @@ async def process_upload(product_id: str, image_path: str, db_session: AsyncSess
         extraction_res = bundle.result
 
         # 2. Derive confidence for each field from the gathered signals.
-        fields = ["brand", "product_name", "weight", "barcode", "category", "packaging"]
+        fields = ["barcode", "category", "segment", "manufacturer", "brand",
+                  "product_name", "weight", "packaging", "country_of_origin",
+                  "marketing_message"]
         product_data = {}
         vision_dump = extraction_res.model_dump()
         for field in fields:

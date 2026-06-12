@@ -12,15 +12,16 @@ router = APIRouter()
 def model_to_response(p: Product) -> ProductResponse:
     def get_field(name: str):
         val = getattr(p, f"{name}_value")
-        conf = getattr(p, f"{name}_confidence")
+        # Legacy rows (created before a column existed) can have NULL confidence.
+        conf = getattr(p, f"{name}_confidence") or 0.0
         reason = getattr(p, f"{name}_reasoning")
         src = getattr(p, f"{name}_source")
-        
+
         level = "missing"
         if conf >= 85: level = "high"
         elif conf >= 60: level = "medium"
         elif val: level = "low"
-        
+
         return FieldValue(
             value=val,
             confidence=conf,
@@ -32,12 +33,16 @@ def model_to_response(p: Product) -> ProductResponse:
     return ProductResponse(
         id=p.id,
         image_url=p.image_url,
+        barcode=get_field("barcode"),
+        category=get_field("category"),
+        segment=get_field("segment"),
+        manufacturer=get_field("manufacturer"),
         brand=get_field("brand"),
         product_name=get_field("product_name"),
         weight=get_field("weight"),
-        barcode=get_field("barcode"),
-        category=get_field("category"),
         packaging=get_field("packaging"),
+        country_of_origin=get_field("country_of_origin"),
+        marketing_message=get_field("marketing_message"),
         status=p.status,
         created_at=p.created_at.isoformat(),
         updated_at=p.updated_at.isoformat()

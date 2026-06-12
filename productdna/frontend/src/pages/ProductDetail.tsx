@@ -227,12 +227,16 @@ function ProductContent({ product }: { product: Product }) {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
+            <Field label="GTIN / Barcode" field={product.barcode} />
+            <Field label="Category" field={product.category} />
+            <Field label="Segment" field={product.segment} />
+            <Field label="Manufacturer" field={product.manufacturer} />
             <Field label="Brand" field={product.brand} />
             <Field label="Product Name" field={product.product_name} />
             <Field label="Net Weight / Volume" field={product.weight} />
-            <Field label="GTIN / Barcode" field={product.barcode} />
-            <Field label="Category" field={product.category} />
             <Field label="Packaging Material" field={product.packaging} />
+            <Field label="Country of Origin" field={product.country_of_origin} />
+            <Field label="Marketing Message" field={product.marketing_message} />
           </div>
         </div>
       </div>

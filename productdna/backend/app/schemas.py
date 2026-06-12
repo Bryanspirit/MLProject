@@ -14,12 +14,16 @@ class FieldValue(BaseModel, Generic[T]):
 class ProductResponse(BaseModel):
     id: str
     image_url: str
+    barcode: FieldValue[str]
+    category: FieldValue[str]
+    segment: FieldValue[str]
+    manufacturer: FieldValue[str]
     brand: FieldValue[str]
     product_name: FieldValue[str]
     weight: FieldValue[str]
-    barcode: FieldValue[str]
-    category: FieldValue[str]
     packaging: FieldValue[str]
+    country_of_origin: FieldValue[str]
+    marketing_message: FieldValue[str]
     status: str
     created_at: str
     updated_at: str
@@ -52,10 +56,14 @@ class StatsResponse(BaseModel):
     needs_review: int
 
 class ExtractionResult(BaseModel):
+    barcode: Optional[str] = None
+    category: Optional[str] = None
+    segment: Optional[str] = None
+    manufacturer: Optional[str] = None
     brand: Optional[str] = None
     product_name: Optional[str] = None
     weight: Optional[str] = None
-    barcode: Optional[str] = None
-    category: Optional[str] = None
     packaging: Optional[str] = None
+    country_of_origin: Optional[str] = None
+    marketing_message: Optional[str] = None
     sources: Any # RawSources will be defined in agent file or here

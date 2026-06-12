@@ -19,13 +19,17 @@ export interface FieldValue {
 export interface Product {
   id: string;
   image_url: string;
+  barcode: FieldValue;
+  category: FieldValue;
+  segment: FieldValue;
+  manufacturer: FieldValue;
   brand: FieldValue;
   product_name: FieldValue;
   weight: FieldValue;
-  barcode: FieldValue;
-  category: FieldValue;
   packaging: FieldValue;
-  status: string; // "extracting" | "needs_review" | "approved" | ...
+  country_of_origin: FieldValue;
+  marketing_message: FieldValue;
+  status: string; // "extracting" | "needs_review" | "approved" | "failed" | ...
   created_at: string;
   updated_at: string;
 }
@@ -153,12 +157,16 @@ export const exportUrl = `${API_BASE}/export`;
 /* --- Helpers ------------------------------------------------------------- */
 
 const FIELD_KEYS = [
+  "barcode",
+  "category",
+  "segment",
+  "manufacturer",
   "brand",
   "product_name",
   "weight",
-  "barcode",
-  "category",
   "packaging",
+  "country_of_origin",
+  "marketing_message",
 ] as const;
 
 /** Average confidence across a product's extracted fields (0-100, rounded). */
