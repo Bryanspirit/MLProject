@@ -23,6 +23,7 @@ httpx==0.28.1                     # barcode lookup + vision HTTP calls
 numpy==2.3.5
 pillow==12.2.0                    # image handling
 easyocr==1.7.2                    # OCR text extraction
+pyzbar==0.1.9                     # barcode (EAN/UPC) decoding from the bar pattern
 openpyxl==3.1.5                   # Excel export
 
 # Deduplication / embeddings (app/dedup)
