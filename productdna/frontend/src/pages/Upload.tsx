@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import SideNavBar from "../components/SideNavBar";
 import PageHeader from "../components/PageHeader";
 import Icon from "../components/Icon";
-import { uploadImage, getProduct, assetUrl } from "../api/client";
+import { uploadImage, uploadBatch, getProduct, assetUrl } from "../api/client";
 
 /* ----------------------------------------------------------------------------
  * Files-in-flight model
@@ -151,6 +151,7 @@ function FileRow({ item, last }: { item: FlightItem; last: boolean }) {
 
 const Upload: React.FC = () => {
   const [items, setItems] = useState<FlightItem[]>([]);
+  const [mergeMode, setMergeMode] = useState(false);
   const timers = useRef<number[]>([]);
 
   useEffect(() => {
@@ -199,9 +200,41 @@ const Upload: React.FC = () => {
     timers.current.push(t);
   }
 
+  // Merge mode: send the whole selection as one batch -> one consolidated record.
+  async function handleBatch(files: File[]) {
+    const key = nextKey();
+    const label =
+      files.length > 1 ? `${files.length} images → 1 product` : files[0].name;
+    setItems((prev) => [
+      { key, name: label, status: "uploading", detail: "Uploading set…" },
+      ...prev,
+    ]);
+    try {
+      const res = await uploadBatch(files);
+      update(key, {
+        productId: res.product_id,
+        status: "extracting",
+        detail: `Merging ${res.image_count} image${res.image_count > 1 ? "s" : ""}…`,
+      });
+      pollStatus(key, res.product_id);
+    } catch (e) {
+      update(key, {
+        status: "error",
+        detail: e instanceof Error ? e.message : "Upload failed.",
+      });
+    }
+  }
+
   async function handleFiles(fileList: FileList | null) {
-    if (!fileList) return;
-    for (const file of Array.from(fileList)) {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    if (mergeMode) {
+      await handleBatch(files);
+      return;
+    }
+
+    for (const file of files) {
       const key = nextKey();
       setItems((prev) => [
         { key, name: file.name, status: "uploading", detail: "Uploading…" },
@@ -243,6 +276,26 @@ const Upload: React.FC = () => {
                 categorize recognized file types. Supported image formats: JPEG, PNG, WebP.
               </p>
             </div>
+
+            {/* Merge toggle */}
+            <label className="flex items-start gap-3 bg-surface-container-low border border-outline-variant rounded-lg p-4 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mergeMode}
+                onChange={(e) => setMergeMode(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary cursor-pointer"
+              />
+              <div>
+                <p className="font-body-sm text-body-sm text-on-surface font-medium">
+                  Merge into one product
+                </p>
+                <p className="text-on-surface-variant text-[12px] mt-0.5">
+                  Treat the selected images as multiple angles of the <em>same</em> item. They’re
+                  extracted together and consolidated into a single record, keeping the
+                  highest-confidence value for each attribute.
+                </p>
+              </div>
+            </label>
 
             {/* Dropzone */}
             <div

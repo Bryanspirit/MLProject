@@ -151,6 +151,25 @@ export async function uploadImage(file: File): Promise<UploadResult> {
   return res.json();
 }
 
+/** Upload several images of the same product and merge them into one record. */
+export async function uploadBatch(
+  files: File[]
+): Promise<UploadResult & { image_count: number }> {
+  const form = new FormData();
+  files.forEach((f) => form.append("files", f));
+  const res = await fetch(`${API_BASE}/upload/batch`, { method: "POST", body: form });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json())?.detail || detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
 /** Direct download URL for the approved-products Excel export. */
 export const exportUrl = `${API_BASE}/export`;
 
