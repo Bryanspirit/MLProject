@@ -1,11 +1,5 @@
-import React from 'react'
+import Dashboard from "./pages/Dashboard";
 
-function App() {
-  return (
-    <div>
-      <h1>ProductDNA</h1>
-    </div>
-  )
+export default function App() {
+  return <Dashboard />;
 }
-
-export default App
