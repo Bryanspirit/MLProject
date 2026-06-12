@@ -29,6 +29,8 @@ async def lookup_barcode(code: str) -> Dict[str, Any]:
         "weight": None,
         "category": None,
         "packaging": None,
+        "manufacturer": None,
+        "country_of_origin": None,
     }
 
     try:
@@ -45,6 +47,13 @@ async def lookup_barcode(code: str) -> Dict[str, Any]:
                         "weight": product.get("quantity"),
                         "category": product.get("categories_tags", [None])[0],
                         "packaging": product.get("packaging"),
+                        # brand_owner is the company behind the brand — the best
+                        # manufacturer proxy OFF exposes.
+                        "manufacturer": product.get("brand_owner"),
+                        # origins = stated origin of the product/ingredients;
+                        # fall back to where it was manufactured.
+                        "country_of_origin": product.get("origins")
+                        or product.get("manufacturing_places"),
                     }
                     BARCODE_CACHE[code] = res
                     return res

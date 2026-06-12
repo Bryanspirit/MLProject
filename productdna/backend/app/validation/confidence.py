@@ -91,6 +91,45 @@ def derive_confidence(
             res_level = "medium"
             res_reasoning = f"Weight value '{vision_val}' does not match expected format"
 
+    elif field in ("manufacturer", "country_of_origin"):
+        label = field.replace("_", " ")
+        lookup_val = (
+            barcode_lookup.get(field)
+            if barcode_lookup and barcode_lookup.get("found")
+            else None
+        )
+        if vision_val:
+            # Vision read it off the package; the lookup confirms or just scores.
+            agree = bool(lookup_val) and normalize_text(vision_val) in normalize_text(lookup_val)
+            if agree:
+                res_conf = 92.0
+                res_level = "high"
+                res_reasoning = f"Vision and barcode lookup agree on {label}"
+                res_source = "barcode_lookup"
+            elif vision_conf >= 0.85:
+                res_conf = 88.0
+                res_level = "high"
+                res_reasoning = f"Confidence derived from vision model signal ({int(vision_conf*100)}%)"
+            elif vision_conf >= 0.6:
+                res_conf = 72.0
+                res_level = "medium"
+                res_reasoning = f"Confidence derived from vision model signal ({int(vision_conf*100)}%)"
+            else:
+                res_conf = 45.0
+                res_level = "low"
+                res_reasoning = f"Confidence derived from vision model signal ({int(vision_conf*100)}%)"
+        elif lookup_val:
+            # Vision missed it — backfill from the barcode lookup.
+            res_val = lookup_val
+            res_conf = 85.0
+            res_level = "high"
+            res_reasoning = f"Backfilled from barcode lookup (Open Food Facts)"
+            res_source = "barcode_lookup"
+        else:
+            res_conf = 0.0
+            res_level = "missing"
+            res_reasoning = f"No {label} found"
+
     else: # product_name, category, packaging
         if vision_conf >= 0.85:
             res_conf = 88.0
