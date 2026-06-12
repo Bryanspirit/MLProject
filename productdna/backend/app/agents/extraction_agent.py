@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 
 from app.tools.vision import vision_describe
 from app.tools.ocr import ocr_full, OCRResult
+from app.tools.barcode_decode import scan_barcodes
 from app.tools.barcode_lookup import lookup_barcode
 from app.validation.barcode import validate_barcode
 
@@ -122,10 +123,15 @@ def _conf(conf: dict, key: str) -> float:
     return min(max(v, 0.0), 1.0)
 
 
-def _pick_barcode(vision_barcode: Optional[str], ocr_text: Optional[str]) -> Optional[str]:
-    """Choose the best barcode candidate from the vision guess and OCR text,
-    preferring one whose check digit validates."""
-    candidates: List[str] = []
+def _pick_barcode(
+    scanned: List[str],
+    vision_barcode: Optional[str],
+    ocr_text: Optional[str],
+) -> Optional[str]:
+    """Choose the best barcode candidate. A pyzbar-scanned code (read from the
+    bar pattern itself) is authoritative, so it comes first; OCR/vision digits
+    are only a fallback. Prefer any candidate whose check digit validates."""
+    candidates: List[str] = list(scanned or [])
     vb = _digits(vision_barcode)
     if 8 <= len(vb) <= 14:
         candidates.append(vb)
@@ -188,10 +194,13 @@ async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
     # 2. Single OCR pass over the full-resolution image.
     ocr = await ocr_full(image_path)
 
-    # 3. Barcode: prefer a clean, check-digit-valid numeric candidate.
-    barcode = _pick_barcode(vision.get("barcode"), ocr.text)
+    # 3. Scan the bar pattern directly (authoritative when a barcode is visible).
+    scanned = await scan_barcodes(image_path)
 
-    # 4. One Open Food Facts lookup, only if we have a candidate.
+    # 4. Barcode: prefer the scanned code, else a check-digit-valid OCR/vision one.
+    barcode = _pick_barcode(scanned, vision.get("barcode"), ocr.text)
+
+    # 5. One Open Food Facts lookup, only if we have a candidate.
     barcode_lookup = await lookup_barcode(barcode) if barcode else {"found": False}
 
     conf = vision.get("confidence") or {}
