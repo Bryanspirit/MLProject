@@ -25,8 +25,29 @@ async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
 
+def _add_missing_columns(conn):
+    """Lightweight migration: SQLAlchemy's create_all creates missing *tables*
+    but never alters existing ones, so newly-added model columns won't appear
+    on a database that predates them. Add any missing columns via ALTER TABLE
+    (SQLite supports ADD COLUMN). Idempotent — safe to run on every startup."""
+    from sqlalchemy import inspect as sa_inspect
+    from app.models import Product
+    insp = sa_inspect(conn)
+    existing = {c["name"] for c in insp.get_columns(Product.__tablename__)}
+    for col in Product.__table__.columns:
+        if col.name in existing:
+            continue
+        coltype = col.type.compile(dialect=conn.dialect)
+        ddl = f'ALTER TABLE {Product.__tablename__} ADD COLUMN "{col.name}" {coltype}'
+        # Backfill non-nullable confidence columns with 0.0 on legacy rows.
+        if col.name.endswith("_confidence"):
+            ddl += " DEFAULT 0.0"
+        conn.exec_driver_sql(ddl)
+
+
 async def init_db():
     async with engine.begin() as conn:
         # Import models here to ensure they are registered with Base
         from app.models import Product, ProductImage, AgentTrace, DuplicateCandidate
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)

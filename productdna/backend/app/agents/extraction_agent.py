@@ -39,18 +39,25 @@ CACHE_DIR = Path("demo_cache")
 
 VISION_PROMPT = (
     "You are a product data extraction specialist. Examine this product "
-    "packaging image and extract the attributes below. Respond with ONLY a "
-    "single JSON object, no prose, using exactly these keys:\n"
+    "packaging image and extract the attributes below for a product master "
+    "database. Respond with ONLY a single JSON object, no prose, using exactly "
+    "these keys:\n"
     "{\n"
-    '  "brand": string or null,\n'
+    '  "barcode": string or null,            // digits only, if a barcode number is legible\n'
+    '  "category": string or null,           // broad category, e.g. "Beverages", "Personal Care"\n'
+    '  "segment": string or null,            // narrower sub-category, e.g. "Carbonated Drinks", "Bar Soap"\n'
+    '  "manufacturer": string or null,       // the company that makes it (often near "Manufactured by")\n'
+    '  "brand": string or null,              // the brand/marque on the front of pack\n'
     '  "product_name": string or null,\n'
-    '  "weight": string or null,            // include the unit, e.g. "500 ml", "100 g"\n'
-    '  "barcode": string or null,           // digits only, if a barcode number is legible\n'
-    '  "category": string or null,          // e.g. "Beverages", "Soap", "Snacks"\n'
-    '  "packaging": string or null,         // e.g. "Bottle", "Box", "Bar", "Can"\n'
-    '  "confidence": {                       // your confidence per field, 0.0-1.0\n'
-    '    "brand": number, "product_name": number, "weight": number,\n'
-    '    "barcode": number, "category": number, "packaging": number\n'
+    '  "weight": string or null,             // net weight/volume WITH unit, e.g. "500 ml", "100 g"\n'
+    '  "packaging": string or null,          // e.g. "Bottle", "Box", "Bar", "Can", "Sachet"\n'
+    '  "country_of_origin": string or null,  // e.g. "Ghana", "Made in Nigeria" -> "Nigeria"\n'
+    '  "marketing_message": string or null,  // any promotional/marketing claim, e.g. "Now 20% bigger!"\n'
+    '  "confidence": {                        // your confidence per field, 0.0-1.0\n'
+    '    "barcode": number, "category": number, "segment": number,\n'
+    '    "manufacturer": number, "brand": number, "product_name": number,\n'
+    '    "weight": number, "packaging": number, "country_of_origin": number,\n'
+    '    "marketing_message": number\n'
     "  }\n"
     "}\n"
     "Use null for anything not clearly visible. Do not guess."
@@ -67,21 +74,29 @@ class RawSources(BaseModel):
 
 
 class ExtractionResult(BaseModel):
+    barcode: Optional[str] = None
+    category: Optional[str] = None
+    segment: Optional[str] = None
+    manufacturer: Optional[str] = None
     brand: Optional[str] = None
     product_name: Optional[str] = None
     weight: Optional[str] = None
-    barcode: Optional[str] = None
-    category: Optional[str] = None
     packaging: Optional[str] = None
+    country_of_origin: Optional[str] = None
+    marketing_message: Optional[str] = None
     # Per-field vision confidence (0-1). Consumed by derive_confidence for the
-    # free-text fields (product_name/category/packaging). Defaulted to 0.5 so a
-    # missing signal never crashes the numeric comparisons downstream.
+    # free-text fields. Defaulted to 0.5 so a missing signal never crashes the
+    # numeric comparisons downstream.
+    barcode_confidence: float = 0.5
+    category_confidence: float = 0.5
+    segment_confidence: float = 0.5
+    manufacturer_confidence: float = 0.5
     brand_confidence: float = 0.5
     product_name_confidence: float = 0.5
     weight_confidence: float = 0.5
-    barcode_confidence: float = 0.5
-    category_confidence: float = 0.5
     packaging_confidence: float = 0.5
+    country_of_origin_confidence: float = 0.5
+    marketing_message_confidence: float = 0.5
     sources: RawSources = Field(default_factory=RawSources)
 
 
@@ -130,12 +145,16 @@ def _demo_extraction(image_path: str) -> ExtractionResult:
     exists, so the upload flow completes without a live model backend."""
     suffix = hashlib.md5(Path(image_path).read_bytes()).hexdigest()[:6].upper()
     return ExtractionResult(
+        barcode=None,
+        category="Beverages",
+        segment="Carbonated Drinks",
+        manufacturer="Demo Manufacturing Co.",
         brand="Demo Brand",
         product_name=f"Sample Product {suffix}",
         weight="500 ml",
-        barcode=None,
-        category="Beverages",
         packaging="Bottle",
+        country_of_origin="Ghana",
+        marketing_message="Now with 20% more!",
         sources=RawSources(
             vision_responses=[{"note": "DEMO_MODE placeholder — no model call"}],
         ),
@@ -177,18 +196,26 @@ async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
 
     conf = vision.get("confidence") or {}
     result = ExtractionResult(
+        barcode=barcode,
+        category=vision.get("category"),
+        segment=vision.get("segment"),
+        manufacturer=vision.get("manufacturer"),
         brand=vision.get("brand"),
         product_name=vision.get("product_name"),
         weight=vision.get("weight"),
-        barcode=barcode,
-        category=vision.get("category"),
         packaging=vision.get("packaging"),
+        country_of_origin=vision.get("country_of_origin"),
+        marketing_message=vision.get("marketing_message"),
+        barcode_confidence=_conf(conf, "barcode"),
+        category_confidence=_conf(conf, "category"),
+        segment_confidence=_conf(conf, "segment"),
+        manufacturer_confidence=_conf(conf, "manufacturer"),
         brand_confidence=_conf(conf, "brand"),
         product_name_confidence=_conf(conf, "product_name"),
         weight_confidence=_conf(conf, "weight"),
-        barcode_confidence=_conf(conf, "barcode"),
-        category_confidence=_conf(conf, "category"),
         packaging_confidence=_conf(conf, "packaging"),
+        country_of_origin_confidence=_conf(conf, "country_of_origin"),
+        marketing_message_confidence=_conf(conf, "marketing_message"),
         sources=RawSources(
             vision_responses=[vision] if vision else [],
             ocr_text=ocr.text,

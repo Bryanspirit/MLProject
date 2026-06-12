@@ -50,6 +50,30 @@ class Product(Base):
     packaging_reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
     packaging_source: Mapped[Optional[str]] = mapped_column(nullable=True)
 
+    # Segment (narrower sub-category within the category)
+    segment_value: Mapped[Optional[str]] = mapped_column(nullable=True)
+    segment_confidence: Mapped[float] = mapped_column(default=0.0)
+    segment_reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    segment_source: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    # Manufacturer
+    manufacturer_value: Mapped[Optional[str]] = mapped_column(nullable=True)
+    manufacturer_confidence: Mapped[float] = mapped_column(default=0.0)
+    manufacturer_reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    manufacturer_source: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    # Country of origin
+    country_of_origin_value: Mapped[Optional[str]] = mapped_column(nullable=True)
+    country_of_origin_confidence: Mapped[float] = mapped_column(default=0.0)
+    country_of_origin_reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    country_of_origin_source: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    # Promotional / marketing message
+    marketing_message_value: Mapped[Optional[str]] = mapped_column(nullable=True)
+    marketing_message_confidence: Mapped[float] = mapped_column(default=0.0)
+    marketing_message_reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
+    marketing_message_source: Mapped[Optional[str]] = mapped_column(nullable=True)
+
     status: Mapped[str] = mapped_column(default="extracting")
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
