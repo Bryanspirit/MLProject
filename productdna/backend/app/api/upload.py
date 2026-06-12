@@ -1,15 +1,13 @@
 import os
 import uuid
 import shutil
+import logging
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models import Product
 from app.agents.extraction_agent import run_extraction
 from app.validation.confidence import derive_confidence
-from app.agents.trace import persist_trace
-from app.tools.ocr import ocr_full
-from app.tools.barcode_lookup import lookup_barcode
 
 router = APIRouter()
 
@@ -17,40 +15,41 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "data/uploads")
 
 async def process_upload(product_id: str, image_path: str, db_session: AsyncSession):
     try:
-        # 1. Run extraction_agent
-        # Note: we need a new session or be careful with the background one
-        # For simplicity in this hackathon, we'll assume the session is usable
-        
-        extraction_res = await run_extraction(image_path, db_session)
-        
-        # 2. Get additional signals for confidence derivation
-        ocr_res = await ocr_full(image_path)
-        barcode_lookup = await lookup_barcode(extraction_res.barcode) if extraction_res.barcode else {"found": False}
-        
-        # 3. Derive confidence for each field
+        # 1. Run the deterministic extraction pipeline. The bundle carries the
+        #    OCR result and barcode lookup it already computed, so we don't redo
+        #    that work here.
+        bundle = await run_extraction(image_path, db_session)
+        extraction_res = bundle.result
+
+        # 2. Derive confidence for each field from the gathered signals.
         fields = ["brand", "product_name", "weight", "barcode", "category", "packaging"]
         product_data = {}
+        vision_dump = extraction_res.model_dump()
         for field in fields:
-            fv = derive_confidence(field, extraction_res.model_dump(), ocr_res, barcode_lookup)
+            fv = derive_confidence(field, vision_dump, bundle.ocr, bundle.barcode_lookup)
             product_data[f"{field}_value"] = fv.value
             product_data[f"{field}_confidence"] = fv.confidence
             product_data[f"{field}_reasoning"] = fv.reasoning
             product_data[f"{field}_source"] = fv.source
 
-        # Update product
         product = await db_session.get(Product, product_id)
         if product:
             for k, v in product_data.items():
                 setattr(product, k, v)
             product.status = "needs_review"
             await db_session.commit()
-            
-            # 4. Traces (Optional for now but good to have)
-            # await persist_trace(product_id, "extraction", extraction_res_obj, db_session)
-        
+
     except Exception as e:
-        import logging
+        # Mark the product failed so the UI shows "Failed" instead of spinning
+        # on "extracting" forever.
         logging.exception(f"Error processing upload: {e}")
+        try:
+            product = await db_session.get(Product, product_id)
+            if product:
+                product.status = "failed"
+                await db_session.commit()
+        except Exception:
+            logging.exception("Could not mark product as failed")
 
 @router.post("/upload")
 async def upload_image(

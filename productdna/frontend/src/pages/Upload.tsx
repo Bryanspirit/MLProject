@@ -177,6 +177,11 @@ const Upload: React.FC = () => {
         if (p.status === "extracting") {
           update(key, { status: "extracting", detail: "Extracting attributes…" });
           pollStatus(key, productId, attempt + 1);
+        } else if (p.status === "failed") {
+          update(key, {
+            status: "error",
+            detail: "Extraction failed. Check the backend logs.",
+          });
         } else {
           update(key, {
             status: "complete",

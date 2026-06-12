@@ -1,42 +1,70 @@
+"""Deterministic product-data extraction pipeline.
+
+Replaces the previous tool-calling agent (which orchestrated a 9.6 GB reasoning
+model and thrashed VRAM swapping between the orchestrator and the vision model).
+The pipeline now runs a fixed, predictable sequence with a *single* vision pass
+and a *single* OCR pass — only the vision model is ever loaded into Ollama, so
+there is no model swapping and far fewer generations per image:
+
+    1. vision_describe  — one call, returns all attributes as JSON
+    2. ocr_full         — one OCR pass over the full image
+    3. barcode pick     — choose a clean numeric candidate from vision/OCR
+    4. lookup_barcode   — one Open Food Facts lookup (if a candidate exists)
+
+Confidence is derived downstream in app/validation/confidence.py from these
+signals; this module only gathers them (exactly once each).
+"""
+
 import os
+import re
 import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Optional, List, Any
-from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext, UsageLimits, PromptedOutput
+from typing import Optional, List
 from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
 
 from app.tools.vision import vision_describe
-from app.tools.ocr import ocr_full, ocr_region, OCRResult
+from app.tools.ocr import ocr_full, OCRResult
 from app.tools.barcode_lookup import lookup_barcode
 from app.validation.barcode import validate_barcode
-from app.agents.ollama_model import ollama_model
 
 load_dotenv()
 
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 CACHE_DIR = Path("demo_cache")
-MAX_ITERATIONS = int(os.getenv("MAX_AGENT_ITERATIONS", "6"))
-# The extraction agent is the *orchestrator*: it calls tools (vision_describe,
-# ocr_*, barcode lookup). It must run on a tool-capable model. The vision model
-# (qwen2.5vl) does NOT support tools and is invoked directly inside the
-# vision_describe tool (see app/tools/vision.py), not as the agent model.
-AGENT_MODEL = os.getenv("AGENT_MODEL", "gemma4:latest")
 
-@dataclass
-class ExtractionDeps:
-    image_path: str
-    db_session: AsyncSession
+VISION_PROMPT = (
+    "You are a product data extraction specialist. Examine this product "
+    "packaging image and extract the attributes below. Respond with ONLY a "
+    "single JSON object, no prose, using exactly these keys:\n"
+    "{\n"
+    '  "brand": string or null,\n'
+    '  "product_name": string or null,\n'
+    '  "weight": string or null,            // include the unit, e.g. "500 ml", "100 g"\n'
+    '  "barcode": string or null,           // digits only, if a barcode number is legible\n'
+    '  "category": string or null,          // e.g. "Beverages", "Soap", "Snacks"\n'
+    '  "packaging": string or null,         // e.g. "Bottle", "Box", "Bar", "Can"\n'
+    '  "confidence": {                       // your confidence per field, 0.0-1.0\n'
+    '    "brand": number, "product_name": number, "weight": number,\n'
+    '    "barcode": number, "category": number, "packaging": number\n'
+    "  }\n"
+    "}\n"
+    "Use null for anything not clearly visible. Do not guess."
+)
+
+_BARCODE_RE = re.compile(r"\d{8,14}")
+
 
 class RawSources(BaseModel):
     vision_responses: List[dict] = Field(default_factory=list)
     ocr_text: Optional[str] = None
     ocr_confidence: Optional[float] = None
     barcode_lookup: Optional[dict] = None
+
 
 class ExtractionResult(BaseModel):
     brand: Optional[str] = None
@@ -45,65 +73,60 @@ class ExtractionResult(BaseModel):
     barcode: Optional[str] = None
     category: Optional[str] = None
     packaging: Optional[str] = None
-    # Defaulted so the model only has to return the attribute fields above;
-    # the raw tool outputs aren't required from the model itself.
+    # Per-field vision confidence (0-1). Consumed by derive_confidence for the
+    # free-text fields (product_name/category/packaging). Defaulted to 0.5 so a
+    # missing signal never crashes the numeric comparisons downstream.
+    brand_confidence: float = 0.5
+    product_name_confidence: float = 0.5
+    weight_confidence: float = 0.5
+    barcode_confidence: float = 0.5
+    category_confidence: float = 0.5
+    packaging_confidence: float = 0.5
     sources: RawSources = Field(default_factory=RawSources)
 
-extraction_agent = Agent(
-    ollama_model(AGENT_MODEL),
-    deps_type=ExtractionDeps,
-    output_type=PromptedOutput(ExtractionResult),
-    retries=3,
-    system_prompt=(
-        "You are a product data extraction specialist. Your job is to extract "
-        "accurate product attributes from product packaging images.\n\n"
-        "Available tools:\n"
-        "- vision_describe: ask targeted questions about the image\n"
-        "- ocr_full: extract all text from the image\n"
-        "- ocr_region: extract text from a specific region (use for barcodes)\n"
-        "- lookup_barcode: verify a barcode against Open Food Facts\n"
-        "- validate_barcode: check if a barcode has a valid check digit\n\n"
-        "Strategy:\n"
-        "1. Start with vision_describe to get an overview of the product\n"
-        "2. Run ocr_full to capture all visible text\n"
-        "3. If a barcode is visible but uncertain, use ocr_region on that area\n"
-        "4. Always call lookup_barcode if you have a candidate barcode\n"
-        "5. Return all fields you can extract — use null for genuinely missing data\n"
-        "6. Do not guess. If you cannot find a field, return null.\n\n"
-        "Be efficient."
-    )
-)
 
-@extraction_agent.tool
-async def tool_vision_describe(ctx: RunContext[ExtractionDeps], question: str) -> dict:
-    """Ask the vision model a targeted question about the product image."""
-    return await vision_describe(ctx.deps.image_path, question)
+@dataclass
+class ExtractionBundle:
+    """The signals process_upload needs to derive confidence — gathered once,
+    so the upload handler never has to re-run OCR or the barcode lookup."""
+    result: ExtractionResult
+    ocr: OCRResult
+    barcode_lookup: dict
 
-@extraction_agent.tool
-async def tool_ocr_full(ctx: RunContext[ExtractionDeps]) -> dict:
-    """Extract all text from the image using OCR."""
-    res = await ocr_full(ctx.deps.image_path)
-    return {"text": res.text, "confidence": res.confidence}
 
-@extraction_agent.tool
-async def tool_ocr_region(ctx: RunContext[ExtractionDeps], x: int, y: int, w: int, h: int) -> dict:
-    """Extract text from a specific region of the image."""
-    res = await ocr_region(ctx.deps.image_path, [x, y, w, h])
-    return {"text": res.text, "confidence": res.confidence}
+def _digits(s: Optional[str]) -> str:
+    return re.sub(r"\D", "", s) if s else ""
 
-@extraction_agent.tool
-async def tool_lookup_barcode(ctx: RunContext[ExtractionDeps], code: str) -> dict:
-    """Verify a barcode against Open Food Facts."""
-    return await lookup_barcode(code)
 
-@extraction_agent.tool
-async def tool_validate_barcode(ctx: RunContext[ExtractionDeps], code: str) -> dict:
-    """Check if a barcode has a valid check digit."""
-    res = validate_barcode(code)
-    return {"valid": res.valid, "format": res.format, "reason": res.reason}
+def _conf(conf: dict, key: str) -> float:
+    """Coerce a per-field confidence to a float in [0, 1], defaulting to 0.5."""
+    try:
+        v = float(conf.get(key))
+    except (TypeError, ValueError):
+        return 0.5
+    return min(max(v, 0.0), 1.0)
+
+
+def _pick_barcode(vision_barcode: Optional[str], ocr_text: Optional[str]) -> Optional[str]:
+    """Choose the best barcode candidate from the vision guess and OCR text,
+    preferring one whose check digit validates."""
+    candidates: List[str] = []
+    vb = _digits(vision_barcode)
+    if 8 <= len(vb) <= 14:
+        candidates.append(vb)
+    candidates.extend(_BARCODE_RE.findall(ocr_text or ""))
+    for c in candidates:
+        if validate_barcode(c).valid:
+            return c
+    return candidates[0] if candidates else None
+
+
+def _empty_ocr() -> OCRResult:
+    return OCRResult(text="", confidence=0.0, detections=[])
+
 
 def _demo_extraction(image_path: str) -> ExtractionResult:
-    """Deterministic placeholder used in DEMO_MODE when no real cache capture
+    """Deterministic placeholder used in DEMO_MODE when no recorded capture
     exists, so the upload flow completes without a live model backend."""
     suffix = hashlib.md5(Path(image_path).read_bytes()).hexdigest()[:6].upper()
     return ExtractionResult(
@@ -115,31 +138,62 @@ def _demo_extraction(image_path: str) -> ExtractionResult:
         packaging="Bottle",
         sources=RawSources(
             vision_responses=[{"note": "DEMO_MODE placeholder — no model call"}],
-            ocr_text=None,
-            ocr_confidence=None,
-            barcode_lookup=None,
         ),
     )
 
 
-async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionResult:
+async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
     # DEMO_MODE: serve a recorded capture if we have one, otherwise a
     # deterministic mock — never touches the live model backend.
     if DEMO_MODE:
         cache_key = hashlib.md5(Path(image_path).read_bytes()).hexdigest()
         cache_file = CACHE_DIR / f"{cache_key}.json"
         if cache_file.exists():
-            return ExtractionResult(**json.loads(cache_file.read_text()))
-        mock = _demo_extraction(image_path)
-        CACHE_DIR.mkdir(exist_ok=True)
-        cache_file.write_text(mock.model_dump_json())
-        return mock
+            result = ExtractionResult(**json.loads(cache_file.read_text()))
+        else:
+            result = _demo_extraction(image_path)
+            CACHE_DIR.mkdir(exist_ok=True)
+            cache_file.write_text(result.model_dump_json())
+        lookup = result.sources.barcode_lookup or {"found": False}
+        return ExtractionBundle(result=result, ocr=_empty_ocr(), barcode_lookup=lookup)
 
-    # Live extraction via the Ollama-backed agent.
-    deps = ExtractionDeps(image_path=image_path, db_session=db)
-    result = await extraction_agent.run(
-        "Extract all product data from this image.",
-        deps=deps,
-        usage_limits=UsageLimits(request_limit=MAX_ITERATIONS)
+    # --- Live deterministic pipeline -------------------------------------- #
+
+    # 1. Single vision pass — all attributes in one JSON response.
+    try:
+        vision = await vision_describe(image_path, VISION_PROMPT)
+    except Exception:
+        logging.exception("Vision pass failed")
+        vision = {}
+
+    # 2. Single OCR pass over the full-resolution image.
+    ocr = await ocr_full(image_path)
+
+    # 3. Barcode: prefer a clean, check-digit-valid numeric candidate.
+    barcode = _pick_barcode(vision.get("barcode"), ocr.text)
+
+    # 4. One Open Food Facts lookup, only if we have a candidate.
+    barcode_lookup = await lookup_barcode(barcode) if barcode else {"found": False}
+
+    conf = vision.get("confidence") or {}
+    result = ExtractionResult(
+        brand=vision.get("brand"),
+        product_name=vision.get("product_name"),
+        weight=vision.get("weight"),
+        barcode=barcode,
+        category=vision.get("category"),
+        packaging=vision.get("packaging"),
+        brand_confidence=_conf(conf, "brand"),
+        product_name_confidence=_conf(conf, "product_name"),
+        weight_confidence=_conf(conf, "weight"),
+        barcode_confidence=_conf(conf, "barcode"),
+        category_confidence=_conf(conf, "category"),
+        packaging_confidence=_conf(conf, "packaging"),
+        sources=RawSources(
+            vision_responses=[vision] if vision else [],
+            ocr_text=ocr.text,
+            ocr_confidence=ocr.confidence,
+            barcode_lookup=barcode_lookup,
+        ),
     )
-    return result.output
+    return ExtractionBundle(result=result, ocr=ocr, barcode_lookup=barcode_lookup)
