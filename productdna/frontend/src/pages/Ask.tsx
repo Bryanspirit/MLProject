@@ -1,19 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import SideNavBar from "../components/SideNavBar";
 import TopAppBar from "../components/TopAppBar";
 import Icon from "../components/Icon";
-
-/* ----------------------------------------------------------------------------
- * Data
- * ------------------------------------------------------------------------- */
-
-const resultRows = [
-  { name: "Coca-Cola Co.", value: "1,245" },
-  { name: "PepsiCo Inc.", value: "1,102" },
-  { name: "Nestle Waters", value: "843" },
-  { name: "Keurig Dr Pepper", value: "756" },
-  { name: "Danone", value: "612" },
-];
+import { ask, QueryResult } from "../api/client";
 
 /* ----------------------------------------------------------------------------
  * Building blocks
@@ -39,33 +28,42 @@ function PanelHeader({
   );
 }
 
-function TraceStep({
-  label,
-  labelColor,
-  dot,
-  children,
-}: {
-  label: string;
-  labelColor: string;
-  dot: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="relative">
-      <div className="absolute -left-[21px] top-1">{dot}</div>
-      <p className={`font-label-caps text-label-caps mb-1 ${labelColor}`}>{label}</p>
-      <p className="font-body-sm text-body-sm text-on-surface">{children}</p>
-    </div>
-  );
+function formatCell(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "number") return v.toLocaleString();
+  return String(v);
 }
-
-const code = "bg-surface-container px-1 py-0.5 rounded text-primary text-[11px]";
 
 /* ----------------------------------------------------------------------------
  * Page
  * ------------------------------------------------------------------------- */
 
+const SUGGESTION = "Which manufacturers have the most beverage products?";
+
 const Ask: React.FC = () => {
+  const [question, setQuestion] = useState(SUGGESTION);
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function execute() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setResult(await ask(q));
+    } catch (e) {
+      setResult(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const columns =
+    result && result.results.length > 0 ? Object.keys(result.results[0]) : [];
+
   return (
     <div className="bg-background text-on-background antialiased flex min-h-screen">
       <SideNavBar active="Ask" />
@@ -84,10 +82,16 @@ const Ask: React.FC = () => {
                 className="w-full bg-transparent border-none py-4 px-4 font-body-base text-body-base text-on-surface focus:ring-0 outline-none"
                 placeholder="Ask anything about your data..."
                 type="text"
-                defaultValue="Which manufacturers have the most beverage products?"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && execute()}
               />
-              <button className="bg-primary text-on-primary px-6 py-4 font-label-caps uppercase tracking-wider hover:bg-surface-tint transition-colors border-l border-primary">
-                Execute
+              <button
+                onClick={execute}
+                disabled={loading || !question.trim()}
+                className="bg-primary text-on-primary px-6 py-4 font-label-caps uppercase tracking-wider hover:bg-surface-tint transition-colors border-l border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Running…" : "Execute"}
               </button>
             </div>
             <div className="flex gap-2 mt-3 px-2">
@@ -102,167 +106,122 @@ const Ask: React.FC = () => {
             </div>
           </div>
 
+          {/* Error */}
+          {error && (
+            <div className="mb-6 flex items-start gap-2 bg-error-container/40 border border-error/30 text-on-error-container rounded-lg p-4">
+              <Icon name="error" size={18} className="text-error mt-0.5" />
+              <div>
+                <p className="font-body-base text-body-base text-on-surface">Query failed</p>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                  {error}. Is the backend running on localhost:8000?
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!result && !loading && !error && (
+            <div className="flex flex-col items-center justify-center text-center gap-2 py-16 text-on-surface-variant">
+              <Icon name="query_stats" size={32} className="text-outline" />
+              <p className="font-body-base text-body-base text-on-surface">Ask a question to get started</p>
+              <p className="font-body-sm text-body-sm max-w-md">
+                The agent inspects your schema, writes SQL, and returns an answer with the data.
+              </p>
+            </div>
+          )}
+
           {/* Results */}
-          <div className="flex flex-col gap-6 w-full animate-fade-in-up">
-            {/* Reasoning + query plan */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Agent Trace */}
-              <div className="lg:col-span-1 bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col">
-                <PanelHeader icon="memory" title="Agent Trace">
-                  <button className="text-on-surface-variant hover:text-primary transition-colors">
-                    <Icon name="open_in_full" size={16} />
-                  </button>
-                </PanelHeader>
-                <div className="p-4 flex-grow overflow-y-auto custom-scrollbar bg-surface-container-low/40">
-                  <div className="relative border-l border-outline-variant/50 ml-3 pl-4 pb-4 space-y-6">
-                    <TraceStep
-                      label="INTENT PARSING"
-                      labelColor="text-secondary"
-                      dot={<span className="block w-2.5 h-2.5 rounded-full bg-secondary" />}
-                    >
-                      Extracted entities: <code className={code}>category="beverage"</code>, metric:{" "}
-                      <code className={code}>count(product)</code>, grouping:{" "}
-                      <code className={code}>manufacturer</code>.
-                    </TraceStep>
-                    <TraceStep
-                      label="SCHEMA MAPPING"
-                      labelColor="text-primary"
-                      dot={<span className="block w-2.5 h-2.5 rounded-full bg-primary" />}
-                    >
-                      Mapping "beverage" to{" "}
-                      <code className={code}>
-                        dim_category.category_name IN ('Beverages', 'Soft Drinks', 'Alcohol')
-                      </code>
-                      . Found relations: <code className={code}>fact_products</code> →{" "}
-                      <code className={code}>dim_manufacturer</code>.
-                    </TraceStep>
-                    <TraceStep
-                      label="SQL GENERATION"
-                      labelColor="text-tertiary"
-                      dot={<span className="block w-2.5 h-2.5 rounded-full bg-tertiary" />}
-                    >
-                      Constructing aggregation query with descending order.
-                    </TraceStep>
-                    <TraceStep
-                      label="EXECUTION"
-                      labelColor="text-primary"
-                      dot={
-                        <span className="block w-2.5 h-2.5 rounded-full border-2 border-primary bg-surface-container-lowest" />
-                      }
-                    >
-                      Query executed successfully in 241ms.
-                    </TraceStep>
+          {result && (
+            <div className="flex flex-col gap-6 w-full animate-fade-in-up">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Answer */}
+                <div className="lg:col-span-1 bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col">
+                  <PanelHeader icon="lightbulb" title="Answer" />
+                  <div className="p-4 flex-grow font-body-sm text-body-sm text-on-surface leading-relaxed">
+                    {result.answer || "No answer returned."}
                   </div>
                 </div>
-              </div>
 
-              {/* Generated Query */}
-              <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col">
-                <PanelHeader icon="data_object" title="Generated Query">
-                  <div className="flex gap-2">
+                {/* Generated Query */}
+                <div className="lg:col-span-2 bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col">
+                  <PanelHeader icon="data_object" title="Generated Query">
                     <button
                       className="text-on-surface-variant hover:text-primary transition-colors p-1"
                       title="Copy"
+                      onClick={() => navigator.clipboard?.writeText(result.sql)}
                     >
                       <Icon name="content_copy" size={16} />
                     </button>
-                    <button
-                      className="text-on-surface-variant hover:text-primary transition-colors p-1"
-                      title="Edit"
-                    >
-                      <Icon name="edit" size={16} />
-                    </button>
+                  </PanelHeader>
+                  <div className="code-block-bg text-gray-300 p-4 font-data-tabular text-data-tabular overflow-x-auto flex-grow custom-scrollbar">
+                    <pre>
+                      <code>{result.sql || "-- no SQL returned"}</code>
+                    </pre>
                   </div>
-                </PanelHeader>
-                <div className="code-block-bg text-gray-300 p-4 font-data-tabular text-data-tabular overflow-x-auto flex-grow custom-scrollbar">
-                  <pre>
-                    <code>
-                      <span className="text-pink-400">SELECT</span>
-                      {"\n    m.manufacturer_name,\n    "}
-                      <span className="text-blue-400">COUNT</span>
-                      {"(p.product_id) "}
-                      <span className="text-pink-400">AS</span>
-                      {" total_beverage_products\n"}
-                      <span className="text-pink-400">FROM</span>
-                      {"\n    fact_products p\n"}
-                      <span className="text-pink-400">JOIN</span>
-                      {"\n    dim_manufacturer m "}
-                      <span className="text-pink-400">ON</span>
-                      {" p.manufacturer_id = m.id\n"}
-                      <span className="text-pink-400">JOIN</span>
-                      {"\n    dim_category c "}
-                      <span className="text-pink-400">ON</span>
-                      {" p.category_id = c.id\n"}
-                      <span className="text-pink-400">WHERE</span>
-                      {"\n    c.category_group = "}
-                      <span className="text-yellow-300">'Beverage'</span>
-                      {"\n"}
-                      <span className="text-pink-400">GROUP BY</span>
-                      {"\n    m.manufacturer_name\n"}
-                      <span className="text-pink-400">ORDER BY</span>
-                      {"\n    total_beverage_products "}
-                      <span className="text-pink-400">DESC</span>
-                      {"\n"}
-                      <span className="text-pink-400">LIMIT</span>{" "}
-                      <span className="text-purple-400">10</span>;
-                    </code>
-                  </pre>
                 </div>
               </div>
-            </div>
 
-            {/* Results table */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col shadow-sm">
-              <div className="px-4 py-3 border-b border-outline-variant bg-surface-container flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-h3 text-h3 text-on-surface flex items-center gap-2">
-                    <Icon name="table_chart" size={16} />
-                    Results
-                  </h3>
-                  <span className="bg-primary/10 text-primary font-label-caps px-2 py-0.5 rounded border border-primary/20">
-                    10 Rows
-                  </span>
+              {/* Results table */}
+              <div className="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col shadow-sm">
+                <div className="px-4 py-3 border-b border-outline-variant bg-surface-container flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-h3 text-h3 text-on-surface flex items-center gap-2">
+                      <Icon name="table_chart" size={16} />
+                      Results
+                    </h3>
+                    <span className="bg-primary/10 text-primary font-label-caps px-2 py-0.5 rounded border border-primary/20">
+                      {result.results.length} Rows
+                    </span>
+                  </div>
                 </div>
-                <button className="flex items-center gap-1 font-label-caps text-on-surface-variant hover:text-primary transition-colors border border-outline-variant rounded px-2 py-1 hover:bg-surface-container">
-                  <Icon name="download" size={16} />
-                  CSV
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse whitespace-nowrap">
-                  <thead className="bg-surface/80 backdrop-blur-md sticky top-0 border-b border-outline-variant">
-                    <tr>
-                      <th className="font-label-caps text-label-caps text-on-surface-variant px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 w-12 text-center">
-                        #
-                      </th>
-                      <th className="font-label-caps text-label-caps text-on-surface-variant px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30">
-                        Manufacturer Name
-                      </th>
-                      <th className="font-label-caps text-label-caps text-on-surface-variant px-cell-padding-h py-cell-padding-v text-right">
-                        Total Beverage Products
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="font-data-tabular text-data-tabular text-on-surface divide-y divide-outline-variant/50">
-                    {resultRows.map((row, idx) => (
-                      <tr
-                        key={row.name}
-                        className="hover:bg-surface-container-low/50 transition-colors h-[32px] group"
-                      >
-                        <td className="px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 text-on-surface-variant text-center">
-                          {idx + 1}
-                        </td>
-                        <td className="px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 font-medium group-hover:text-primary transition-colors">
-                          {row.name}
-                        </td>
-                        <td className="px-cell-padding-h py-cell-padding-v text-right">{row.value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {columns.length === 0 ? (
+                  <div className="p-6 text-center font-body-sm text-body-sm text-on-surface-variant">
+                    The query returned no rows.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse whitespace-nowrap">
+                      <thead className="bg-surface/80 backdrop-blur-md sticky top-0 border-b border-outline-variant">
+                        <tr>
+                          <th className="font-label-caps text-label-caps text-on-surface-variant px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 w-12 text-center">
+                            #
+                          </th>
+                          {columns.map((c) => (
+                            <th
+                              key={c}
+                              className="font-label-caps text-label-caps text-on-surface-variant px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 last:border-r-0"
+                            >
+                              {c}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="font-data-tabular text-data-tabular text-on-surface divide-y divide-outline-variant/50">
+                        {result.results.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            className="hover:bg-surface-container-low/50 transition-colors h-[32px] group"
+                          >
+                            <td className="px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 text-on-surface-variant text-center">
+                              {idx + 1}
+                            </td>
+                            {columns.map((c) => (
+                              <td
+                                key={c}
+                                className="px-cell-padding-h py-cell-padding-v border-r border-outline-variant/30 last:border-r-0 group-hover:text-primary transition-colors"
+                              >
+                                {formatCell(row[c])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
         </main>
       </div>
     </div>

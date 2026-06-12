@@ -3,8 +3,18 @@ import SideNavBar from '../components/SideNavBar';
 import TopAppBar from '../components/TopAppBar';
 import StatCard from '../components/StatCard';
 import RecentExtractionsTable from '../components/RecentExtractionsTable';
+import { getStats, getProducts } from '../api/client';
+import { useFetch } from '../hooks/useFetch';
 
 const Dashboard: React.FC = () => {
+  const stats = useFetch(getStats);
+  const products = useFetch(() => getProducts());
+
+  const recent = (products.data ?? []).slice(0, 8);
+
+  const dash = (v: number | undefined, suffix = '') =>
+    stats.loading ? '…' : stats.error || v === undefined ? '—' : `${v}${suffix}`;
+
   return (
     <div className="bg-background text-on-background font-body-base text-body-base min-h-screen">
       <SideNavBar />
@@ -17,13 +27,29 @@ const Dashboard: React.FC = () => {
               Overview of product extraction activity and items needing attention.
             </p>
           </div>
+
+          {stats.error && (
+            <p className="font-body-sm text-body-sm text-error">
+              Couldn’t reach the API ({stats.error}). Is the backend running on localhost:8000?
+            </p>
+          )}
+
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard title="Products processed" value="1,284" change="+12%" />
-            <StatCard title="Avg confidence" value="92%" change="+2%" />
-            <StatCard title="Duplicates pending" value="14" />
-            <StatCard title="Needs review" value="28" special={true} />
+            <StatCard title="Products processed" value={dash(stats.data?.products_processed)} />
+            <StatCard
+              title="Avg confidence"
+              value={dash(stats.data ? Math.round(stats.data.avg_confidence) : undefined, '%')}
+            />
+            <StatCard title="Duplicates pending" value={dash(stats.data?.duplicates_pending)} />
+            <StatCard title="Needs review" value={dash(stats.data?.needs_review)} special={true} />
           </section>
-          <RecentExtractionsTable />
+
+          <RecentExtractionsTable
+            extractions={recent}
+            loading={products.loading}
+            error={products.error}
+            onRetry={products.reload}
+          />
         </main>
       </div>
     </div>

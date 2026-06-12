@@ -2,14 +2,31 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Environments
 .env
+.env.local
 .venv
 env/
 venv/
 ENV/
+
+# Databases
+*.db
 productdna.db
-productdna/backend/data/uploads/*
-!productdna/backend/data/uploads/.gitkeep
+
+# Uploaded assets (runtime data, not source)
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+
+# Demo/extraction cache (runtime artifacts)
+backend/demo_cache/*
+!backend/demo_cache/.gitkeep
+
+# IDE
+.idea/
+
+# Frontend
 node_modules/
 dist/
 .DS_Store

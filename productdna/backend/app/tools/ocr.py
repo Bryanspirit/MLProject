@@ -35,10 +35,11 @@ class OCRResult:
     detections: List[Detection]
 
 # Initialize readers
+# We are now explicitly telling PaddleOCR to use the GPU (use_gpu=True).
 if HAS_PADDLE:
-    paddle_ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+    paddle_ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False, use_gpu=True)
 elif HAS_EASYOCR:
-    easy_reader = easyocr.Reader(['en'])
+    easy_reader = easyocr.Reader(['en'], gpu=True)
 else:
     logging.error("No OCR engine available (PaddleOCR or EasyOCR)")
 

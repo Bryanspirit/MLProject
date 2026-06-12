@@ -14,4 +14,4 @@ async def ask_question(request: QueryRequest, db: AsyncSession = Depends(get_db)
     # Run the query agent
     # Note: query_agent doesn't need deps for now
     result = await query_agent.run(request.question)
-    return result.data
+    return result.output

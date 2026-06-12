@@ -1,8 +1,9 @@
 import os
 from typing import List, Dict, Any
-from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent, RunContext, PromptedOutput
 from app.tools.db_tools import inspect_schema, sample_table, run_sql
+from app.agents.ollama_model import ollama_model
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,11 +14,12 @@ MAX_ITERATIONS = int(os.getenv("MAX_AGENT_ITERATIONS", "6"))
 class QueryResult(BaseModel):
     answer: str
     sql: str
-    results: List[Dict[str, Any]]
+    results: List[Dict[str, Any]] = Field(default_factory=list)
 
 query_agent = Agent(
-    f"ollama:{TEXT_MODEL}",
-    output_type=QueryResult,
+    ollama_model(TEXT_MODEL),
+    output_type=PromptedOutput(QueryResult),
+    retries=3,
     system_prompt=(
         "You are a SQL expert working with a retail product database.\n\n"
         "Use inspect_schema to understand the tables before writing any SQL.\n"
