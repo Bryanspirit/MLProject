@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5-vl:7b")
+VISION_MODEL = os.getenv("VISION_MODEL", "qwen2.5vl:7b")
 # Vision inference cost scales with pixels. Product text stays legible well
 # below full camera resolution, so downscale the longest edge before sending.
 VISION_MAX_DIM = int(os.getenv("VISION_MAX_DIM", "1280"))

@@ -1,7 +1,16 @@
 import httpx
 import asyncio
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from functools import lru_cache
+
+
+def _clean_off_tag(tag: Optional[str]) -> Optional[str]:
+    """Open Food Facts category tags look like 'en:carbonated-drinks'. Strip the
+    leading language prefix and turn it into a human-readable label."""
+    if not tag:
+        return None
+    label = tag.split(":", 1)[-1].replace("-", " ").strip()
+    return label.title() or None
 
 @lru_cache(maxsize=1000)
 def get_cached_barcode(code: str) -> Optional[Dict[str, Any]]:
@@ -28,6 +37,7 @@ async def lookup_barcode(code: str) -> Dict[str, Any]:
         "product_name": None,
         "weight": None,
         "category": None,
+        "segment": None,
         "packaging": None,
         "manufacturer": None,
         "country_of_origin": None,
@@ -40,12 +50,19 @@ async def lookup_barcode(code: str) -> Dict[str, Any]:
                 data = response.json()
                 if data.get("status") == 1:
                     product = data.get("product", {})
+                    # categories_tags is ordered broad -> specific, e.g.
+                    # ["en:beverages", "en:carbonated-drinks"]. Use the broadest
+                    # as the category and the most specific as the segment.
+                    cat_tags: List[str] = product.get("categories_tags") or []
+                    category = _clean_off_tag(cat_tags[0]) if cat_tags else None
+                    segment = _clean_off_tag(cat_tags[-1]) if len(cat_tags) > 1 else None
                     res = {
                         "found": True,
                         "brand": product.get("brands"),
                         "product_name": product.get("product_name"),
                         "weight": product.get("quantity"),
-                        "category": product.get("categories_tags", [None])[0],
+                        "category": category,
+                        "segment": segment,
                         "packaging": product.get("packaging"),
                         # brand_owner is the company behind the brand — the best
                         # manufacturer proxy OFF exposes.
