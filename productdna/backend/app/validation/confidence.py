@@ -91,7 +91,7 @@ def derive_confidence(
             res_level = "medium"
             res_reasoning = f"Weight value '{vision_val}' does not match expected format"
 
-    elif field in ("manufacturer", "country_of_origin"):
+    elif field in ("manufacturer", "country_of_origin", "category", "segment"):
         label = field.replace("_", " ")
         lookup_val = (
             barcode_lookup.get(field)
@@ -99,7 +99,7 @@ def derive_confidence(
             else None
         )
         if vision_val:
-            # Vision read it off the package; the lookup confirms or just scores.
+            # Vision inferred/read the value; the lookup confirms or just scores.
             agree = bool(lookup_val) and normalize_text(vision_val) in normalize_text(lookup_val)
             if agree:
                 res_conf = 92.0
@@ -130,7 +130,7 @@ def derive_confidence(
             res_level = "missing"
             res_reasoning = f"No {label} found"
 
-    else: # product_name, category, packaging
+    else: # product_name, packaging
         if vision_conf >= 0.85:
             res_conf = 88.0
             res_level = "high"

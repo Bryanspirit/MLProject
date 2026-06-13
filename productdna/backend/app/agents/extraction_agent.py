@@ -19,7 +19,6 @@ import os
 import re
 import hashlib
 import json
-import logging
 from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass
@@ -45,8 +44,8 @@ VISION_PROMPT = (
     "these keys:\n"
     "{\n"
     '  "barcode": string or null,            // digits only, if a barcode number is legible\n'
-    '  "category": string or null,           // broad category, e.g. "Beverages", "Personal Care"\n'
-    '  "segment": string or null,            // narrower sub-category, e.g. "Carbonated Drinks", "Bar Soap"\n'
+    '  "category": string,                   // ALWAYS classify; broad category inferred from the product, e.g. "Beverages", "Personal Care"\n'
+    '  "segment": string,                    // ALWAYS classify; narrower sub-category inferred from the product, e.g. "Carbonated Drinks", "Bar Soap"\n'
     '  "manufacturer": string or null,       // the company that makes it (often near "Manufactured by")\n'
     '  "brand": string or null,              // the brand/marque on the front of pack\n'
     '  "product_name": string or null,\n'
@@ -61,7 +60,12 @@ VISION_PROMPT = (
     '    "marketing_message": number\n'
     "  }\n"
     "}\n"
-    "Use null for anything not clearly visible. Do not guess."
+    "For the printed fields (barcode, manufacturer, brand, product_name, weight, "
+    "packaging, country_of_origin, marketing_message) use null for anything not "
+    "clearly visible and do not guess. But category and segment are NOT printed "
+    "on the pack — you must ALWAYS infer and return them by looking at what the "
+    "product clearly is (its type, brand, and use). Never return null for "
+    "category or segment."
 )
 
 _BARCODE_RE = re.compile(r"\d{8,14}")
@@ -184,12 +188,12 @@ async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
 
     # --- Live deterministic pipeline -------------------------------------- #
 
-    # 1. Single vision pass — all attributes in one JSON response.
-    try:
-        vision = await vision_describe(image_path, VISION_PROMPT)
-    except Exception:
-        logging.exception("Vision pass failed")
-        vision = {}
+    # 1. Single vision pass — all attributes in one JSON response. A hard
+    # failure here (model unreachable, wrong model name, repeated bad JSON)
+    # means we have essentially no data, so let it propagate: the upload
+    # handler marks the product "failed" rather than committing an empty
+    # "needs_review" record that looks like a successful extraction.
+    vision = await vision_describe(image_path, VISION_PROMPT)
 
     # 2. Single OCR pass over the full-resolution image.
     ocr = await ocr_full(image_path)
