@@ -115,6 +115,62 @@ See [DOCKER.md](DOCKER.md) for full deployment details.
 
 ---
 
+## Running from a fresh clone (e.g. for judges/reviewers)
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+running. For the full AI pipeline, also [Ollama](https://ollama.com/) on the host
+(see Option A). No GPU? Use Option B.
+
+```bash
+# 1. Clone and enter the app directory
+git clone https://github.com/Bryanspirit/MLProject.git
+cd MLProject/productdna
+git checkout feat/dashboard-ui
+```
+
+### Option A — Full setup (real AI extraction; needs Ollama + ideally a GPU)
+
+```bash
+# Pull the models into the host's Ollama (one-time)
+ollama pull qwen2.5vl:7b    # vision model — does the extraction
+ollama pull qwen2.5:7b      # text model — powers the "Ask" page (optional)
+
+# Build and start (first build downloads ML deps — allow a few minutes)
+docker compose up -d --build
+```
+
+### Option B — Demo mode (no GPU, no Ollama, no models)
+
+Runs the upload/review/export flow against a built-in mock extractor:
+
+```bash
+# macOS/Linux:
+DEMO_MODE=true docker compose up -d --build
+
+# Windows PowerShell:
+#   $env:DEMO_MODE="true"; docker compose up -d --build
+```
+
+### Open the app
+
+- **Frontend:** http://localhost:3000
+- **Backend API docs:** http://localhost:8080/docs
+
+> If port 3000 is taken, start with `FRONTEND_PORT=3001 docker compose up -d`
+> and open http://localhost:3001.
+
+### Try it
+
+1. Go to **Upload** and drop in a product image (or several angles with
+   "Merge into one product").
+2. Watch the live extraction progress, then open **Review** to verify and
+   approve the extracted attributes.
+3. Check **Duplicates** for flagged matches and **Dashboard** for stats.
+
+Stop everything with `docker compose down`.
+
+---
+
 ## Configuration
 
 Set via environment variables (a `.env` file in `productdna/` is read by
