@@ -47,7 +47,12 @@ const RecentExtractionsTable: React.FC<Props> = ({ extractions, loading, error, 
     <section className="bg-surface-container-lowest border border-outline-variant rounded-lg flex flex-col overflow-hidden">
       <div className="p-5 border-b border-outline-variant flex justify-between items-center">
         <h2 className="font-h3 text-h3 text-on-surface">Recent Extractions</h2>
-        <button className="font-body-sm text-body-sm text-primary hover:text-surface-tint font-medium transition-colors">View All</button>
+        <a
+          href="#/products"
+          className="font-body-sm text-body-sm text-primary hover:text-surface-tint font-medium transition-colors"
+        >
+          View All
+        </a>
       </div>
 
       {loading ? (
@@ -71,7 +76,11 @@ const RecentExtractionsTable: React.FC<Props> = ({ extractions, loading, error, 
             </thead>
             <tbody className="font-data-tabular text-data-tabular text-on-surface divide-y divide-outline-variant">
               {extractions.map((p) => (
-                <tr key={p.id} className="hover:bg-surface-container-low transition-colors h-8">
+                <tr
+                  key={p.id}
+                  onClick={() => { window.location.hash = `#/products/${p.id}`; }}
+                  className="hover:bg-surface-container-low transition-colors h-8 cursor-pointer"
+                >
                   <td className="px-cell-padding-h py-1">
                     <div className="w-8 h-8 rounded bg-surface-variant border border-outline-variant overflow-hidden flex items-center justify-center">
                       {p.image_url ? (

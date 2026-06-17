@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Generic, TypeVar, Literal, Any, List
+from typing import Optional, Generic, TypeVar, Literal, Any, List, Dict
 from datetime import datetime
 
 T = TypeVar("T")
@@ -27,6 +27,14 @@ class ProductResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
+
+class ProductUpdate(BaseModel):
+    """Reviewer edits. `fields` maps an IMDB attribute name to its corrected
+    value (null/empty clears it); edited fields are marked source="manual" at
+    100% confidence. `status` optionally transitions the record (e.g. approve)."""
+    fields: Dict[str, Optional[str]] = Field(default_factory=dict)
+    status: Optional[str] = None
+
 
 class AgentStep(BaseModel):
     id: str

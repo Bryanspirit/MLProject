@@ -77,15 +77,27 @@ def _run_easy(image_path: str) -> OCRResult:
     avg_conf = np.mean([d.confidence for d in detections]) if detections else 0.0
     return OCRResult(text=all_text, confidence=float(avg_conf), detections=detections)
 
+def _empty_result() -> OCRResult:
+    return OCRResult(text="", confidence=0.0, detections=[])
+
+
 async def ocr_full(image_path: str) -> OCRResult:
-    """Run OCR on the full image."""
+    """Run OCR on the full image. OCR is a *secondary* signal (the vision pass
+    is the primary extractor), so any engine failure — including EasyOCR's known
+    OpenCV zero-size-crop crash on certain images — degrades to empty OCR rather
+    than aborting the whole extraction."""
     loop = asyncio.get_event_loop()
-    if HAS_PADDLE:
-        return await loop.run_in_executor(executor, _run_paddle, image_path)
-    elif HAS_EASYOCR:
-        return await loop.run_in_executor(executor, _run_easy, image_path)
-    else:
-        raise RuntimeError("No OCR engine available")
+    try:
+        if HAS_PADDLE:
+            return await loop.run_in_executor(executor, _run_paddle, image_path)
+        elif HAS_EASYOCR:
+            return await loop.run_in_executor(executor, _run_easy, image_path)
+        else:
+            logging.warning("No OCR engine available — skipping OCR")
+            return _empty_result()
+    except Exception:
+        logging.exception("OCR failed; continuing without OCR text")
+        return _empty_result()
 
 async def ocr_region(image_path: str, bbox: List[int]) -> OCRResult:
     """Crop the image to bbox=[x, y, w, h] then run OCR on the crop."""

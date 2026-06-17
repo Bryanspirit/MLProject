@@ -1,8 +1,17 @@
 import React from 'react';
+import { useMobileNav } from '../hooks/useMobileNav';
 
 const TopAppBar: React.FC = () => {
+  const { setOpen } = useMobileNav();
   return (
-    <header className="sticky top-0 w-full z-40 bg-surface/80 dark:bg-inverse-surface/80 backdrop-blur-md border-b border-outline-variant dark:border-outline flex justify-between items-center h-16 px-container-padding">
+    <header className="sticky top-0 w-full z-40 bg-surface/80 dark:bg-inverse-surface/80 backdrop-blur-md border-b border-outline-variant dark:border-outline flex justify-between items-center h-16 px-container-padding gap-2">
+      <button
+        aria-label="Open navigation"
+        onClick={() => setOpen(true)}
+        className="md:hidden text-on-surface-variant hover:text-primary transition-colors p-1 -ml-1 flex-shrink-0"
+      >
+        <span className="material-symbols-outlined">menu</span>
+      </button>
       <div className="flex-1 max-w-md">
         <div className="relative flex items-center w-full h-10 rounded-lg bg-surface-container-low border border-outline-variant overflow-hidden focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all">
           <div className="grid place-items-center h-full w-12 text-on-surface-variant">

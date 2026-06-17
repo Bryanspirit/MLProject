@@ -20,7 +20,7 @@ import re
 import hashlib
 import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Callable
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,7 +171,21 @@ def _demo_extraction(image_path: str) -> ExtractionResult:
     )
 
 
-async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
+async def run_extraction(
+    image_path: str,
+    db: Optional[AsyncSession] = None,
+    on_stage: Optional[Callable[[str], None]] = None,
+) -> ExtractionBundle:
+    # `db` is unused — extraction gathers signals from the vision/OCR/barcode
+    # tools only and never touches the database. Kept optional for callers that
+    # still pass a session. `on_stage(label)` is called as each pipeline stage
+    # begins, so the UI can show real progress.
+    def _emit(stage: str) -> None:
+        if on_stage:
+            try:
+                on_stage(stage)
+            except Exception:
+                pass
     # DEMO_MODE: serve a recorded capture if we have one, otherwise a
     # deterministic mock — never touches the live model backend.
     if DEMO_MODE:
@@ -193,18 +207,22 @@ async def run_extraction(image_path: str, db: AsyncSession) -> ExtractionBundle:
     # means we have essentially no data, so let it propagate: the upload
     # handler marks the product "failed" rather than committing an empty
     # "needs_review" record that looks like a successful extraction.
+    _emit("vision")
     vision = await vision_describe(image_path, VISION_PROMPT)
 
     # 2. Single OCR pass over the full-resolution image.
+    _emit("ocr")
     ocr = await ocr_full(image_path)
 
     # 3. Scan the bar pattern directly (authoritative when a barcode is visible).
+    _emit("barcode")
     scanned = await scan_barcodes(image_path)
 
     # 4. Barcode: prefer the scanned code, else a check-digit-valid OCR/vision one.
     barcode = _pick_barcode(scanned, vision.get("barcode"), ocr.text)
 
     # 5. One Open Food Facts lookup, only if we have a candidate.
+    _emit("lookup")
     barcode_lookup = await lookup_barcode(barcode) if barcode else {"found": False}
 
     conf = vision.get("confidence") or {}

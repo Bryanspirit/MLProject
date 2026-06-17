@@ -1,10 +1,19 @@
 import Icon from "./Icon";
+import { useMobileNav } from "../hooks/useMobileNav";
 
 /** Shared top bar that shows a page title instead of the dashboard search. */
 export default function PageHeader({ title }: { title: string }) {
+  const { setOpen } = useMobileNav();
   return (
     <header className="bg-surface/80 backdrop-blur-md sticky top-0 w-full z-40 border-b border-outline-variant flex justify-between items-center h-16 px-container-padding flex-shrink-0">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2">
+        <button
+          aria-label="Open navigation"
+          onClick={() => setOpen(true)}
+          className="md:hidden text-on-surface-variant hover:text-primary transition-colors p-1 -ml-1"
+        >
+          <Icon name="menu" />
+        </button>
         <span className="font-h3 text-h3 text-on-surface">{title}</span>
       </div>
       <div className="flex items-center gap-4">
