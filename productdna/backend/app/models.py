@@ -86,6 +86,8 @@ class ProductImage(Base):
     filename: Mapped[str]
     file_size: Mapped[int]
     mime_type: Mapped[str]
+    # sha256 of the uploaded bytes — used to short-circuit identical re-uploads.
+    sha256: Mapped[Optional[str]] = mapped_column(nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 class AgentTrace(Base):

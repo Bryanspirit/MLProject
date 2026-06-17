@@ -1,0 +1,22 @@
+# Keep the build context small and the image clean.
+.venv/
+venv/
+env/
+ENV/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Runtime data — provided by mounted volumes, not the image
+data/
+demo_cache/
+
+# Local config / IDE / VCS — container config comes from compose, not files
+.env
+.env.local
+.env.example
+.idea/
+.git/
+tests/
+Dockerfile
+.dockerignore

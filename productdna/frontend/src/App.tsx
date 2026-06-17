@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import Dashboard from "./pages/Dashboard";
-import ProductDetail from "./pages/ProductDetail";
+import Products from "./pages/Products";
 import ProductReviewPage from "./pages/ProductReview";
+import Review from "./pages/Review";
 import Upload from "./pages/Upload";
 import Duplicates from "./pages/Duplicates";
 import Ask from "./pages/Ask";
@@ -34,6 +35,8 @@ const App: React.FC = () => {
   }
 
   switch (hash) {
+    case "#/review":
+      return <Review />;
     case "#/upload":
       return <Upload />;
     case "#/duplicates":
@@ -45,7 +48,7 @@ const App: React.FC = () => {
     case "#/help":
       return <Help />;
     case "#/products":
-      return <ProductDetail />; // This would be the product list page
+      return <Products />;
     case "#/":
     default:
       return <Dashboard />;

@@ -1,16 +1,41 @@
 import os
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.db import init_db
+from app.db import init_db, recover_stuck_extractions
 
-app = FastAPI(title="ProductDNA API", version="1.0.0")
 
-# CORS
-# We add the new frontend port to the allowlist.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown hook (replaces the deprecated @app.on_event)."""
+    await init_db()
+    # Unstick any extractions interrupted by the previous restart.
+    recovered = await recover_stuck_extractions()
+    if recovered:
+        logging.warning(
+            "Recovered %d product(s) stuck in 'extracting' after restart", recovered
+        )
+    yield
+
+
+app = FastAPI(title="ProductDNA API", version="1.0.0", lifespan=lifespan)
+
+# CORS — origins are configurable via the CORS_ORIGINS env var (comma-separated).
+# Defaults cover the local frontend ports (Vite dev 5173/5174 and the dockerised
+# nginx on 3000/3001). In Docker, nginx proxies /api same-origin so CORS isn't
+# exercised, but a correct list keeps direct cross-origin calls working too.
+_DEFAULT_ORIGINS = (
+    "http://localhost:3000,http://localhost:3001,"
+    "http://localhost:5173,http://localhost:5174"
+)
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", _DEFAULT_ORIGINS).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,11 +50,6 @@ app.mount("/static/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-# DB init on startup
-@app.on_event("startup")
-async def startup():
-    await init_db()
 
 # Routers
 from app.api import upload, products, duplicates, export, query, dashboard

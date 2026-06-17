@@ -1,9 +1,10 @@
 /* ----------------------------------------------------------------------------
  * Typed client for the ProductDNA FastAPI backend.
  *
- * The API host defaults to http://localhost:8000 (the backend's dev port) and
- * can be overridden with VITE_API_BASE_URL. CORS on the backend allows the
- * Vite dev origin (http://localhost:5173).
+ * The API host defaults to http://localhost:8080 (the backend's host port — see
+ * BACKEND_PORT in docker-compose) and can be overridden with VITE_API_BASE_URL.
+ * In Docker the build sets VITE_API_BASE_URL=/api so calls go same-origin through
+ * nginx. CORS on the backend allows the Vite dev origin (http://localhost:5173).
  * ------------------------------------------------------------------------- */
 
 export type ConfidenceLevel = "high" | "medium" | "low" | "missing";
@@ -48,6 +49,9 @@ export interface Stats {
   avg_confidence: number;
   duplicates_pending: number;
   needs_review: number;
+  approved: number;
+  failed: number;
+  extracting: number;
 }
 
 export interface DuplicateCandidate {
@@ -72,7 +76,7 @@ export interface UploadResult {
 // Accept either a bare host (http://localhost:8000) or one that already
 // includes the /api suffix — normalize so we never double it to /api/api.
 const RAW_BASE: string = (
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000"
+  (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8080"
 ).replace(/\/+$/, "");
 const API_HOST = RAW_BASE.replace(/\/api$/, "");
 const API_BASE = `${API_HOST}/api`;
@@ -116,6 +120,40 @@ export const getProducts = (params?: { status?: string; search?: string }) => {
 };
 
 export const getProduct = (id: string) => request<Product>(`/products/${id}`);
+
+/** SSE endpoint streaming a product's extraction progress ({status, stage}). */
+export const productEventsUrl = (id: string) => `${API_BASE}/products/${id}/events`;
+
+/** Re-run extraction for a product whose previous attempt failed. */
+export const retryExtraction = (id: string) =>
+  request<{ product_id: string; status: string }>(`/products/${id}/retry`, {
+    method: "POST",
+  });
+
+export interface ProductDuplicate {
+  candidate_id: string;
+  other: Product;
+  similarity: number;
+}
+
+/** Pending duplicate candidates that involve this product. */
+export const getProductDuplicates = (id: string) =>
+  request<ProductDuplicate[]>(`/products/${id}/duplicates`);
+
+/** Apply reviewer edits and/or a status change. Only send the fields that
+ * actually changed; edited fields become source="manual" at 100% confidence. */
+export const updateProduct = (
+  id: string,
+  payload: { fields?: Record<string, string | null>; status?: string }
+) =>
+  request<Product>(`/products/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+/** Approve a product, optionally persisting any pending edits in the same call. */
+export const approveProduct = (id: string, fields?: Record<string, string | null>) =>
+  updateProduct(id, { fields, status: "approved" });
 
 export const getDuplicates = () => request<DuplicateCandidate[]>("/duplicates");
 

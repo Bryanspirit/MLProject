@@ -2,7 +2,18 @@ import React, { useEffect, useRef, useState } from "react";
 import SideNavBar from "../components/SideNavBar";
 import PageHeader from "../components/PageHeader";
 import Icon from "../components/Icon";
-import { uploadImage, uploadBatch, getProduct, assetUrl } from "../api/client";
+import StateMessage from "../components/StateMessage";
+import ProductReviewPanel from "../components/ProductReviewPanel";
+import {
+  uploadImage,
+  uploadBatch,
+  getProduct,
+  retryExtraction,
+  productEventsUrl,
+  assetUrl,
+  Product,
+} from "../api/client";
+import { useToast } from "../hooks/useToast";
 
 /* ----------------------------------------------------------------------------
  * Files-in-flight model
@@ -17,6 +28,21 @@ interface FlightItem {
   status: FlightStatus;
   thumb?: string;
   detail: string;
+  progress?: number; // real pipeline progress (0-100) while extracting
+}
+
+// Maps a backend pipeline stage to a human label and an approximate progress %.
+const STAGE_INFO: Record<string, { label: string; pct: number }> = {
+  queued: { label: "Queued…", pct: 8 },
+  vision: { label: "Reading the pack (vision)…", pct: 30 },
+  ocr: { label: "Extracting text (OCR)…", pct: 55 },
+  barcode: { label: "Scanning barcode…", pct: 70 },
+  lookup: { label: "Looking up barcode…", pct: 85 },
+  consolidating: { label: "Consolidating angles…", pct: 92 },
+};
+
+function stageInfo(stage?: string | null): { label: string; pct: number } {
+  return (stage && STAGE_INFO[stage]) || { label: "Extracting attributes…", pct: 65 };
 }
 
 const statusConfig: Record<
@@ -59,6 +85,38 @@ let counter = 0;
 const nextKey = () => `f${Date.now()}_${counter++}`;
 
 /* ----------------------------------------------------------------------------
+ * Client-side validation
+ *
+ * The dropzone's `accept` attribute only filters the browse dialog — drag-and-
+ * dropped files bypass it entirely. Validate here so unsupported or oversized
+ * files get a clear, per-file reason instead of a generic backend 400.
+ * Keep this in sync with the backend ALLOWED_TYPES (app/api/upload.py).
+ * ------------------------------------------------------------------------- */
+
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ACCEPTED_EXTS = [".jpg", ".jpeg", ".png", ".webp"];
+const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Returns a human-readable reason if the file is invalid, or null if it's fine.
+function validateFile(file: File): string | null {
+  // Browsers sometimes leave file.type blank; fall back to the extension.
+  const typeOk = file.type
+    ? ACCEPTED_TYPES.includes(file.type)
+    : ACCEPTED_EXTS.some((ext) => file.name.toLowerCase().endsWith(ext));
+  if (!typeOk) return "Unsupported format — use JPEG, PNG, or WebP.";
+  if (file.size === 0) return "File is empty.";
+  if (file.size > MAX_FILE_BYTES)
+    return `Too large (${formatBytes(file.size)}). Max ${formatBytes(MAX_FILE_BYTES)}.`;
+  return null;
+}
+
+/* ----------------------------------------------------------------------------
  * Row
  * ------------------------------------------------------------------------- */
 
@@ -88,10 +146,26 @@ function FileIconCell({ item }: { item: FlightItem }) {
   );
 }
 
-function FileRow({ item, last }: { item: FlightItem; last: boolean }) {
+function FileRow({
+  item,
+  last,
+  expanded,
+  onReview,
+  onRetry,
+}: {
+  item: FlightItem;
+  last: boolean;
+  expanded: boolean;
+  onReview: (item: FlightItem) => void;
+  onRetry: (item: FlightItem) => void;
+}) {
   const cfg = statusConfig[item.status];
   const isComplete = item.status === "complete";
   const inFlight = item.status === "uploading" || item.status === "extracting";
+  const canRetry = item.status === "error" && !!item.productId;
+  // Use the real pipeline progress while extracting; fall back to the coarse
+  // per-status default otherwise.
+  const barPct = inFlight && item.progress != null ? item.progress : cfg.progress;
 
   return (
     <div
@@ -110,7 +184,7 @@ function FileRow({ item, last }: { item: FlightItem; last: boolean }) {
         <div className="w-full bg-surface-variant h-1.5 rounded-full overflow-hidden">
           <div
             className={`${cfg.bar} h-full transition-all duration-1000 ease-out`}
-            style={{ width: `${cfg.progress}%` }}
+            style={{ width: `${barPct}%` }}
           />
         </div>
       </div>
@@ -126,12 +200,26 @@ function FileRow({ item, last }: { item: FlightItem; last: boolean }) {
 
       <div className="flex-shrink-0 w-24 text-right">
         {isComplete && item.productId ? (
-          <a
-            href={`#/products/${item.productId}`}
-            className="inline-block font-body-sm text-body-sm text-on-primary bg-primary border border-primary rounded px-3 py-1.5 hover:bg-surface-tint transition-colors shadow-sm font-medium"
+          <button
+            onClick={() => onReview(item)}
+            aria-expanded={expanded}
+            className={`inline-flex items-center gap-1 font-body-sm text-body-sm rounded px-3 py-1.5 transition-colors shadow-sm font-medium border ${
+              expanded
+                ? "text-on-surface bg-surface-container-high border-outline-variant"
+                : "text-on-primary bg-primary border-primary hover:bg-surface-tint"
+            }`}
           >
-            Review
-          </a>
+            {expanded ? "Close" : "Review"}
+            <Icon name={expanded ? "expand_less" : "expand_more"} size={16} />
+          </button>
+        ) : canRetry ? (
+          <button
+            onClick={() => onRetry(item)}
+            className="inline-flex items-center gap-1 font-body-sm text-body-sm rounded px-3 py-1.5 transition-colors shadow-sm font-medium border text-on-surface bg-surface-container-high border-outline-variant hover:bg-surface-container-highest"
+          >
+            <Icon name="refresh" size={16} />
+            Retry
+          </button>
         ) : (
           <button
             disabled
@@ -152,52 +240,79 @@ function FileRow({ item, last }: { item: FlightItem; last: boolean }) {
 const Upload: React.FC = () => {
   const [items, setItems] = useState<FlightItem[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [productCache, setProductCache] = useState<Record<string, Product>>({});
+  const [reviewError, setReviewError] = useState<Record<string, string>>({});
   const timers = useRef<number[]>([]);
+  const streams = useRef<EventSource[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
     return () => {
       timers.current.forEach((t) => clearTimeout(t));
+      streams.current.forEach((es) => es.close());
     };
   }, []);
 
   const update = (key: string, patch: Partial<FlightItem>) =>
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
 
-  // Poll for up to ~5 min: CPU vision extraction can take minutes per image.
-  function pollStatus(key: string, productId: string, attempt = 0) {
-    if (attempt > 100) {
-      update(key, {
-        status: "error",
-        detail: "Timed out. Is the model backend (Ollama) running?",
-      });
+  // Subscribe to the backend SSE stream for live, stage-accurate progress
+  // (vision → ocr → barcode → lookup) instead of polling a fake bar.
+  function openStream(key: string, productId: string) {
+    let es: EventSource;
+    try {
+      es = new EventSource(productEventsUrl(productId));
+    } catch {
+      update(key, { status: "error", detail: "Could not open progress stream." });
       return;
     }
-    const t = window.setTimeout(async () => {
+    streams.current.push(es);
+
+    es.onmessage = async (e) => {
+      let data: { status?: string; stage?: string | null; error?: string };
       try {
-        const p = await getProduct(productId);
-        if (p.status === "extracting") {
-          update(key, { status: "extracting", detail: "Extracting attributes…" });
-          pollStatus(key, productId, attempt + 1);
-        } else if (p.status === "failed") {
-          update(key, {
-            status: "error",
-            detail: "Extraction failed. Check the backend logs.",
-          });
-        } else {
-          update(key, {
-            status: "complete",
-            detail: "Ready for stewardship",
-            thumb: p.image_url ? assetUrl(p.image_url) : undefined,
-          });
-        }
-      } catch (e) {
+        data = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (data.error === "not_found") {
+        update(key, { status: "error", detail: "Product not found." });
+        es.close();
+        return;
+      }
+      if (data.status === "failed") {
         update(key, {
           status: "error",
-          detail: e instanceof Error ? e.message : "Status check failed.",
+          detail: "Extraction failed. Check the backend logs.",
         });
+        es.close();
+      } else if (data.status === "approved" || data.status === "needs_review") {
+        es.close();
+        let thumb: string | undefined;
+        try {
+          const p = await getProduct(productId);
+          thumb = p.image_url ? assetUrl(p.image_url) : undefined;
+        } catch {
+          /* thumb is optional */
+        }
+        update(key, {
+          status: "complete",
+          detail: data.status === "approved" ? "Auto-approved" : "Ready for stewardship",
+          progress: 100,
+          thumb,
+        });
+      } else {
+        const { label, pct } = stageInfo(data.stage);
+        update(key, { status: "extracting", detail: label, progress: pct });
       }
-    }, 2000);
-    timers.current.push(t);
+    };
+
+    // Transient drops: EventSource auto-reconnects. We explicitly close on a
+    // terminal status above, so this never loops indefinitely.
+    es.onerror = () => {
+      /* allow built-in reconnect */
+    };
   }
 
   // Merge mode: send the whole selection as one batch -> one consolidated record.
@@ -216,7 +331,7 @@ const Upload: React.FC = () => {
         status: "extracting",
         detail: `Merging ${res.image_count} image${res.image_count > 1 ? "s" : ""}…`,
       });
-      pollStatus(key, res.product_id);
+      openStream(key, res.product_id);
     } catch (e) {
       update(key, {
         status: "error",
@@ -229,12 +344,35 @@ const Upload: React.FC = () => {
     if (!fileList || fileList.length === 0) return;
     const files = Array.from(fileList);
 
+    // Validate up front: rejected files get an error row and never hit the API.
+    const valid: File[] = [];
+    const rejected: { file: File; reason: string }[] = [];
+    for (const file of files) {
+      const reason = validateFile(file);
+      if (reason) rejected.push({ file, reason });
+      else valid.push(file);
+    }
+
+    if (rejected.length > 0) {
+      setItems((prev) => [
+        ...rejected.map(({ file, reason }) => ({
+          key: nextKey(),
+          name: file.name,
+          status: "error" as FlightStatus,
+          detail: reason,
+        })),
+        ...prev,
+      ]);
+    }
+
+    if (valid.length === 0) return;
+
     if (mergeMode) {
-      await handleBatch(files);
+      await handleBatch(valid);
       return;
     }
 
-    for (const file of files) {
+    for (const file of valid) {
       const key = nextKey();
       setItems((prev) => [
         { key, name: file.name, status: "uploading", detail: "Uploading…" },
@@ -247,7 +385,7 @@ const Upload: React.FC = () => {
           status: "extracting",
           detail: "Extracting attributes…",
         });
-        pollStatus(key, res.product_id);
+        openStream(key, res.product_id);
       } catch (e) {
         update(key, {
           status: "error",
@@ -255,6 +393,67 @@ const Upload: React.FC = () => {
         });
       }
     }
+  }
+
+  // Re-run a failed extraction without re-uploading, then resume polling.
+  async function handleRetry(item: FlightItem) {
+    if (!item.productId) return;
+    update(item.key, { status: "extracting", detail: "Retrying extraction…" });
+    try {
+      await retryExtraction(item.productId);
+      openStream(item.key, item.productId);
+    } catch (e) {
+      update(item.key, {
+        status: "error",
+        detail: e instanceof Error ? e.message : "Retry failed.",
+      });
+    }
+  }
+
+  // Toggle the inline review panel for a completed item, fetching the full
+  // product the first time it's opened.
+  async function handleReview(item: FlightItem) {
+    if (!item.productId) return;
+    if (expandedKey === item.key) {
+      setExpandedKey(null);
+      return;
+    }
+    setExpandedKey(item.key);
+    if (!productCache[item.productId]) {
+      try {
+        const p = await getProduct(item.productId);
+        setProductCache((c) => ({ ...c, [p.id]: p }));
+      } catch (e) {
+        setReviewError((m) => ({
+          ...m,
+          [item.key]: e instanceof Error ? e.message : "Failed to load product.",
+        }));
+      }
+    }
+  }
+
+  // Reflect a save/approve back into the row + cache.
+  function handleReviewed(item: FlightItem, updated: Product) {
+    setProductCache((c) => ({ ...c, [updated.id]: updated }));
+    update(item.key, {
+      detail: updated.status === "approved" ? "Approved — ready for export" : "Changes saved",
+    });
+  }
+
+  function renderReview(item: FlightItem) {
+    const err = reviewError[item.key];
+    if (err) return <StateMessage variant="error" message={err} />;
+    const p = item.productId ? productCache[item.productId] : undefined;
+    if (!p)
+      return <StateMessage variant="loading" message="Loading extracted attributes…" />;
+    return (
+      <ProductReviewPanel
+        product={p}
+        onChange={(u) => handleReviewed(item, u)}
+        onSuccess={toast.success}
+        onError={toast.error}
+      />
+    );
   }
 
   const activeCount = items.filter(
@@ -320,7 +519,7 @@ const Upload: React.FC = () => {
                 <p className="font-body-sm text-body-sm text-on-surface-variant max-w-md">
                   Drag and drop your files directly into this area, or{" "}
                   <span className="text-primary font-medium">browse your computer</span>. Supported
-                  formats: .jpg, .png, .webp.
+                  formats: .jpg, .png, .webp — up to {formatBytes(MAX_FILE_BYTES)} each.
                 </p>
                 <input
                   aria-label="File upload input"
@@ -347,9 +546,30 @@ const Upload: React.FC = () => {
                 </div>
 
                 <div className="border border-outline-variant rounded-lg bg-surface-container-lowest overflow-hidden shadow-sm">
-                  {items.map((item, idx) => (
-                    <FileRow key={item.key} item={item} last={idx === items.length - 1} />
-                  ))}
+                  {items.map((item, idx) => {
+                    const isExpanded = expandedKey === item.key;
+                    const isLast = idx === items.length - 1;
+                    return (
+                      <React.Fragment key={item.key}>
+                        <FileRow
+                          item={item}
+                          last={isLast && !isExpanded}
+                          expanded={isExpanded}
+                          onReview={handleReview}
+                          onRetry={handleRetry}
+                        />
+                        {isExpanded && (
+                          <div
+                            className={`bg-surface-container-low p-5 ${
+                              isLast ? "" : "border-b border-outline-variant"
+                            }`}
+                          >
+                            {renderReview(item)}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               </div>
             )}

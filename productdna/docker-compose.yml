@@ -1,3 +1,50 @@
-version: '3.8'
+name: productdna
+
 services:
-  # Define services here
+  backend:
+    build: ./backend
+    image: productdna-backend
+    environment:
+      # Ollama runs on the host (GPU + already-pulled models). Reach it from
+      # the container via the Docker host gateway.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # These models must be pulled on the host Ollama first, e.g.:
+      #   ollama pull qwen2.5vl:7b   (vision)
+      #   ollama pull gemma2:latest  (agent/text)
+      # "gemma4" was a typo — no such model exists (Gemma versions are 1/2/3).
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:7b}
+      AGENT_MODEL: ${AGENT_MODEL:-gemma2:latest}
+      TEXT_MODEL: ${TEXT_MODEL:-gemma2:latest}
+      DB_PATH: data/productdna.db
+      UPLOAD_DIR: data/uploads
+      DEMO_MODE: ${DEMO_MODE:-false}
+      MAX_AGENT_ITERATIONS: ${MAX_AGENT_ITERATIONS:-6}
+      DEDUP_THRESHOLD: ${DEDUP_THRESHOLD:-0.85}
+    volumes:
+      # Persist the SQLite DB, uploaded images, and the extraction cache so they
+      # survive container rebuilds/restarts.
+      - ./backend/data:/app/data
+      - ./backend/demo_cache:/app/demo_cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${BACKEND_PORT:-8080}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    image: productdna-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
