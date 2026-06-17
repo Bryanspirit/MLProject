@@ -8,13 +8,13 @@ services:
       # Ollama runs on the host (GPU + already-pulled models). Reach it from
       # the container via the Docker host gateway.
       OLLAMA_BASE_URL: http://host.docker.internal:11434
-      # These models must be pulled on the host Ollama first, e.g.:
-      #   ollama pull qwen2.5vl:7b   (vision)
-      #   ollama pull gemma2:latest  (agent/text)
-      # "gemma4" was a typo — no such model exists (Gemma versions are 1/2/3).
+      # Models must be pulled on the host Ollama first:
+      #   ollama pull qwen2.5vl:7b   (vision — core extraction)
+      #   ollama pull qwen2.5:7b     (text — the "Ask" NL-query page only)
+      # Extraction uses only the vision model; TEXT_MODEL is the "Ask" feature.
+      # (The old AGENT_MODEL was dead config — nothing in the code read it.)
       VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:7b}
-      AGENT_MODEL: ${AGENT_MODEL:-gemma2:latest}
-      TEXT_MODEL: ${TEXT_MODEL:-gemma2:latest}
+      TEXT_MODEL: ${TEXT_MODEL:-qwen2.5:7b}
       DB_PATH: data/productdna.db
       UPLOAD_DIR: data/uploads
       DEMO_MODE: ${DEMO_MODE:-false}
